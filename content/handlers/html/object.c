@@ -80,8 +80,31 @@ struct content_html_object *html_get_objects(hlcache_handle *h, unsigned int *n)
 static void
 html_object_failed(struct box *box, html_content *content, bool background)
 {
-	/* Nothing to do */
-	return;
+	if (background || box == NULL)
+		return;
+
+	/* Clear IS_REPLACED so the box renders its children (fallback content)
+	 * instead of trying to render the failed object.  CSS2.1 requires
+	 * <object> fallback children to display when the object fails. */
+	box->flags &= ~IS_REPLACED;
+	box->object = NULL;
+
+	/* Invalidate ancestor widths so layout recomputes from children. */
+	{
+		struct box *b;
+		for (b = box; b; b = b->parent)
+			b->max_width = UNKNOWN_MAX_WIDTH;
+	}
+
+	/* Trigger a full reformat so fallback children get proper layout.
+	 * A simple redraw is not enough — the box may have 0 dimensions
+	 * from the initial layout (replaced element with no content). */
+	if (content->base.status == CONTENT_STATUS_READY ||
+			content->base.status == CONTENT_STATUS_DONE) {
+		content__reformat(&content->base, false,
+				content->base.available_width,
+				content->base.available_height);
+	}
 }
 
 /**
@@ -218,6 +241,16 @@ html_object_callback(hlcache_handle *object,
 			data.redraw.height = box->height;
 
 			content_broadcast(&c->base, CONTENT_MSG_REDRAW, &data);
+		} else if (c->base.status != CONTENT_STATUS_LOADING &&
+				!(box->flags & REPLACE_DIM) &&
+				(box->flags & IS_REPLACED)) {
+			/* Non-REPLACE_DIM replaced elements (e.g. <object>
+			 * without explicit width/height) need a reformat
+			 * so the layout picks up intrinsic dimensions from
+			 * the now-loaded content. */
+			content__reformat(&c->base, false,
+					c->base.available_width,
+					c->base.available_height);
 		}
 		break;
 

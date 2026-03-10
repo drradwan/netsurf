@@ -1635,7 +1635,8 @@ box_object(dom_node *n,
 			       false))
 		return false;
 
-	*convert_children = false;
+	/* Allow children to be converted — they serve as fallback content
+	 * if the object fails to load (CSS2.1 / Acid2 compliance). */
 	return true;
 }
 

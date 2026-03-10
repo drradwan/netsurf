@@ -215,7 +215,7 @@ endif
 
 # We trace during link so that we can determine if a libary changes under us in
 # order to re-link.  This *may* be gcc specific, so may need tweaks in future.
-LDFLAGS += -Wl,--trace
+#####################LDFLAGS += -Wl,--trace  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc  # disabled for zig-cc
 
 # ----------------------------------------------------------------------------
 # General make rules
