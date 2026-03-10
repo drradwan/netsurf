@@ -596,7 +596,8 @@ static bool html_redraw_background(int x, int y, struct box *box, float scale,
 		const struct rect *clip, colour *background_colour,
 		struct box *background,
 		const css_unit_ctx *unit_len_ctx,
-		const struct redraw_context *ctx)
+		const struct redraw_context *ctx,
+		const html_content *html)
 {
 	bool repeat_x = false;
 	bool repeat_y = false;
@@ -623,7 +624,20 @@ static bool html_redraw_background(int x, int y, struct box *box, float scale,
 	plot_content = (background->background != NULL);
 
 	if (plot_content) {
-		if (!box->parent) {
+		bool bg_fixed = (css_computed_background_attachment(
+				background->style) ==
+				CSS_BACKGROUND_ATTACHMENT_FIXED);
+
+		if (bg_fixed && html != NULL) {
+			/* background-attachment:fixed — position image
+			 * relative to the viewport, not the box.
+			 * redraw_offset_x/y is the content-to-screen
+			 * translation set in html_redraw(). */
+			x = html->redraw_offset_x;
+			y = html->redraw_offset_y;
+			width = html->base.available_width;
+			height = html->base.height;
+		} else if (!box->parent) {
 			/* Root element, special case:
 			 * background origin calc. is based on margin box */
 			x -= box->margin[LEFT] * scale;
@@ -1515,7 +1529,7 @@ bool html_redraw_box(const html_content *html, struct box *box,
 			/* plot background */
 			if (!html_redraw_background(x, y, box, scale, &p,
 					&current_background_color, bg_box,
-					&html->unit_len_ctx, ctx))
+					&html->unit_len_ctx, ctx, html))
 				return false;
 			/* restore previous graphics window */
 			if (ctx->plot->clip(ctx, &r) != NSERROR_OK)
@@ -1955,6 +1969,10 @@ bool html_redraw(struct content *c, struct content_redraw_data *data,
 
 	box = html->layout;
 	assert(box);
+
+	/* Store viewport offset for background-attachment:fixed */
+	html->redraw_offset_x = data->x;
+	html->redraw_offset_y = data->y;
 
 	/* The select menu needs special treating because, when opened, it
 	 * reaches beyond its layout box.

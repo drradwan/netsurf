@@ -141,6 +141,11 @@ typedef struct html_content {
 	/** Document background colour. */
 	colour background_colour;
 
+	/** Viewport origin in screen coordinates (set during redraw).
+	 *  Used for background-attachment:fixed positioning. */
+	int redraw_offset_x;
+	int redraw_offset_y;
+
 	/** Font callback table */
 	const struct gui_layout_table *font_func;
 
