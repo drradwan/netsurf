@@ -36,6 +36,7 @@
 #include "netsurf/content.h"
 #include "netsurf/misc.h"
 #include "content/hlcache.h"
+#include "content/llcache.h"
 #include "css/utils.h"
 #include "desktop/scrollbar.h"
 #include "desktop/gui_internal.h"
@@ -777,7 +778,8 @@ html_fetch_object(html_content *c,
 	object->background = background;
 
 	error = hlcache_handle_retrieve(url,
-					HLCACHE_RETRIEVE_SNIFF_TYPE,
+					HLCACHE_RETRIEVE_SNIFF_TYPE |
+					LLCACHE_RETRIEVE_NO_ERROR_PAGES,
 					content_get_url(&c->base),
 					NULL,
 					object_callback,

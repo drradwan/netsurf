@@ -839,6 +839,7 @@ static bool html_redraw_inline_background(int x, int y, struct box *box,
 		float scale, const struct rect *clip, struct rect b,
 		bool first, bool last, colour *background_colour,
 		const css_unit_ctx *unit_len_ctx,
+		const html_content *html,
 		const struct redraw_context *ctx)
 {
 	struct rect r = *clip;
@@ -854,6 +855,16 @@ static bool html_redraw_inline_background(int x, int y, struct box *box,
 		.fill_colour = *background_colour,
 	};
 	nserror res;
+
+	/* background-attachment:fixed — position relative to viewport */
+	if (html != NULL) {
+		bool bg_fixed = (css_computed_background_attachment(box->style) ==
+				CSS_BACKGROUND_ATTACHMENT_FIXED);
+		if (bg_fixed) {
+			x = html->redraw_offset_x;
+			y = html->redraw_offset_y;
+		}
+	}
 
 	plot_content = (box->background != NULL);
 
@@ -1609,7 +1620,7 @@ bool html_redraw_box(const html_content *html, struct box *box,
 						x, y, box, scale, &p, b,
 						first, false,
 						&current_background_color,
-						&html->unit_len_ctx, ctx))
+						&html->unit_len_ctx, html, ctx))
 					return false;
 				/* restore previous graphics window */
 				if (ctx->plot->clip(ctx, &r) != NSERROR_OK)
@@ -1642,7 +1653,7 @@ bool html_redraw_box(const html_content *html, struct box *box,
 		 * the inline */
 		if (!html_redraw_inline_background(x, ib_y, box, scale, &p, b,
 				first, true, &current_background_color,
-				&html->unit_len_ctx, ctx))
+				&html->unit_len_ctx, html, ctx))
 			return false;
 		/* restore previous graphics window */
 		if (ctx->plot->clip(ctx, &r) != NSERROR_OK)
