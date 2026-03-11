@@ -372,12 +372,28 @@ framebuffer_plot_bitmap(const struct redraw_context *ctx,
 
 	/* get left most tile position */
 	if (repeat_x) {
-		for (; x > clipbox.x0; x -= width);
+		if (x < clipbox.x0) {
+			/* Fast-forward: tile origin is left of clip (e.g. fixed
+			 * background positioned at viewport origin while the
+			 * element is far to the right).  Advance by whole tile
+			 * steps so the first tile overlaps clipbox.x0.
+			 * Without this, bitmap_tiles_x receives xoff >= width
+			 * and computes a negative pvideo_pos, rendering at the
+			 * wrong screen position. */
+			x += ((clipbox.x0 - x) / width) * width;
+		} else {
+			for (; x > clipbox.x0; x -= width);
+		}
 	}
 
 	/* get top most tile position */
 	if (repeat_y) {
-		for (; y > clipbox.y0; y -= height);
+		if (y < clipbox.y0) {
+			/* Same fix for the vertical axis. */
+			y += ((clipbox.y0 - y) / height) * height;
+		} else {
+			for (; y > clipbox.y0; y -= height);
+		}
 	}
 
 	/* set up top left tile location */

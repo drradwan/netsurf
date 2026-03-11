@@ -19,6 +19,10 @@ S_HTML := box_construct.c	\
 	layout_flex.c		\
 	object.c		\
 	redraw.c		\
+	redraw_modules/redraw-background.c	\
+	redraw_modules/redraw-forms.c	\
+	redraw_modules/redraw-text.c	\
+	redraw_modules/redraw-box.c	\
 	redraw_border.c		\
 	script.c		\
 	table.c			\

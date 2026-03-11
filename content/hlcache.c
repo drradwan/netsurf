@@ -271,7 +271,17 @@ static nserror hlcache_find_content(hlcache_retrieval_ctx *ctx,
 				effective_type);
 		if (entry->content == NULL) {
 			free(entry);
-			return NSERROR_NOMEM;
+			/* No content handler for this type — fire CONTENT_MSG_ERROR
+			 * so <object> fallback chains activate (html_object_failed). */
+			if (ctx->handle->cb != NULL) {
+				hlcache_event hlevent;
+				hlevent.type = CONTENT_MSG_ERROR;
+				hlevent.data.errordata.errorcode = NSERROR_NOMEM;
+				hlevent.data.errordata.errormsg = NULL;
+				ctx->handle->cb(ctx->handle, &hlevent,
+						ctx->handle->pw);
+			}
+			return NSERROR_OK;
 		}
 
 		/* Insert into cache */

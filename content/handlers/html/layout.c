@@ -3410,6 +3410,33 @@ layout_line(struct box *first,
 				d->y += 0.75 * (used_height - d->height);
 				break;
 			}
+		} else if (d->type == BOX_INLINE && lh__box_is_replace(d)) {
+			/* CSS2.1 §10.8.1: replaced inline elements also need
+			 * vertical alignment within the line box. The strut
+			 * establishes the line box height; align the replaced
+			 * element (e.g. img) within it. */
+			css_fixed value = 0;
+			css_unit unit = CSS_UNIT_PX;
+			int h = d->margin[TOP] + d->border[TOP].width +
+					d->padding[TOP] + d->height +
+					d->padding[BOTTOM] +
+					d->border[BOTTOM].width +
+					d->margin[BOTTOM];
+			switch (css_computed_vertical_align(d->style, &value,
+					&unit)) {
+			case CSS_VERTICAL_ALIGN_TOP:
+			case CSS_VERTICAL_ALIGN_TEXT_TOP:
+				/* already at top */
+				break;
+			case CSS_VERTICAL_ALIGN_BOTTOM:
+			case CSS_VERTICAL_ALIGN_TEXT_BOTTOM:
+				d->y += used_height - h;
+				break;
+			default:
+			case CSS_VERTICAL_ALIGN_BASELINE:
+				d->y += 0.75 * (used_height - h);
+				break;
+			}
 		}
 	}
 
@@ -3476,7 +3503,8 @@ static bool layout_inline_container(struct box *inline_container, int width,
 
 		if ((lh__box_is_object(c) == false &&
 				c->text && (c->length || is_pre)) ||
-				c->type == BOX_BR)
+				c->type == BOX_BR ||
+				lh__box_is_replace(c))
 			has_text_children = true;
 	}
 
@@ -4534,7 +4562,7 @@ layout_compute_offsets(const css_unit_ctx *unit_len_ctx,
 			*bottom = FPCT_OF_INT_TOINT(value,
 					containing_block->height);
 		} else {
-			*bottom = FIXTOINT(css_unit_len2device_px(
+				*bottom = FIXTOINT(css_unit_len2device_px(
 					box->style, unit_len_ctx,
 					value, unit));
 		}
@@ -4957,8 +4985,24 @@ layout_position_absolute(struct box *box,
 						CSS_POSITION_ABSOLUTE ||
 				 css_computed_position(c->style) ==
 						CSS_POSITION_FIXED)) {
-			if (!layout_absolute(c, containing_block,
-					cx, cy, content))
+			/* CSS2.1 §10.1: for position:fixed the containing
+			 * block is the viewport (initial containing block =
+			 * content->layout root box), not the nearest
+			 * positioned ancestor. */
+			struct box *abs_cb;
+			int abs_cx, abs_cy;
+			if (css_computed_position(c->style) ==
+					CSS_POSITION_FIXED) {
+				abs_cb = content->layout;
+				abs_cx = 0;
+				abs_cy = 0;
+			} else {
+				abs_cb = containing_block;
+				abs_cx = cx;
+				abs_cy = cy;
+			}
+			if (!layout_absolute(c, abs_cb,
+					abs_cx, abs_cy, content))
 				return false;
 			if (!layout_position_absolute(c, c, 0, 0, content))
 				return false;
