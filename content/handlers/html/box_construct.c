@@ -1352,6 +1352,86 @@ dom_to_box(dom_node *n,
 
 
 /* exported function documented in html/box_construct.h */
+nserror
+dom_to_box_sync(dom_node *n, html_content *c)
+{
+	struct box_construct_ctx ctx_s;
+	struct box_construct_ctx *ctx = &ctx_s;
+	dom_node *next;
+	bool convert_children;
+
+	if (c->bctx == NULL) {
+		c->bctx = talloc_zero(0, int);
+		if (c->bctx == NULL) {
+			return NSERROR_NOMEM;
+		}
+	}
+
+	ctx->content = c;
+	ctx->n = dom_node_ref(n);
+	ctx->root_box = NULL;
+	ctx->cb = NULL;
+	ctx->bctx = c->bctx;
+
+	while (ctx->n != NULL) {
+		convert_children = true;
+
+		if (box_construct_element(ctx, &convert_children) == false) {
+			dom_node_unref(ctx->n);
+			return NSERROR_BOX_CONVERT;
+		}
+
+		next = next_node(ctx->n, ctx->content, convert_children);
+		while (next != NULL) {
+			dom_node_type type;
+			dom_exception err;
+
+			err = dom_node_get_node_type(next, &type);
+			if (err != DOM_NO_ERR) {
+				dom_node_unref(next);
+				return NSERROR_DOM;
+			}
+
+			if (type == DOM_ELEMENT_NODE)
+				break;
+
+			if (type == DOM_TEXT_NODE) {
+				ctx->n = next;
+				if (box_construct_text(ctx) == false) {
+					dom_node_unref(ctx->n);
+					return NSERROR_BOX_CONVERT;
+				}
+			}
+
+			next = next_node(next, ctx->content, true);
+		}
+
+		ctx->n = next;
+	}
+
+	/* Finalize: normalize and set layout root */
+	if (ctx->root_box != NULL) {
+		struct box root;
+
+		memset(&root, 0, sizeof(root));
+		root.type = BOX_BLOCK;
+		root.children = root.last = ctx->root_box;
+		root.children->parent = &root;
+
+		if (box_normalise_block(&root, ctx->root_box,
+				ctx->content) == false) {
+			return NSERROR_BOX_CONVERT;
+		}
+
+		c->layout = root.children;
+		c->layout->parent = NULL;
+	}
+
+	return NSERROR_OK;
+}
+
+
+/* exported function documented in html/box_construct.h */
 nserror cancel_dom_to_box(void *box_conversion_context)
 {
 	struct box_construct_ctx *ctx = box_conversion_context;

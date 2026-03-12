@@ -83,6 +83,18 @@
  */
 nserror dom_to_box(struct dom_node *n, struct html_content *c, box_construct_complete_cb cb, void **box_conversion_context);
 
+/**
+ * Synchronously convert a DOM tree to a box tree.
+ *
+ * Like dom_to_box() but runs to completion without yielding.
+ * Used for rebuilding the box tree after JS DOM mutations.
+ *
+ * \param n dom document element
+ * \param c content of type CONTENT_HTML
+ * \return netsurf error code
+ */
+nserror dom_to_box_sync(struct dom_node *n, struct html_content *c);
+
 
 /**
  * aborts any ongoing box construction

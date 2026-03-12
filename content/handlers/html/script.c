@@ -170,7 +170,11 @@ convert_script_async_cb(hlcache_handle *script,
 			break;
 	}
 
-	assert(i != parent->scripts_count);
+	if (i == parent->scripts_count) {
+		NSLOG(netsurf, WARNING,
+		      "Async script callback for unknown handle %p", script);
+		return NSERROR_OK;
+	}
 
 	switch (event->type) {
 	case CONTENT_MSG_LOADING:
@@ -238,7 +242,11 @@ convert_script_defer_cb(hlcache_handle *script,
 			break;
 	}
 
-	assert(i != parent->scripts_count);
+	if (i == parent->scripts_count) {
+		NSLOG(netsurf, WARNING,
+		      "Defer script callback for unknown handle %p", script);
+		return NSERROR_OK;
+	}
 
 	switch (event->type) {
 
@@ -305,7 +313,11 @@ convert_script_sync_cb(hlcache_handle *script,
 			break;
 	}
 
-	assert(i != parent->scripts_count);
+	if (i == parent->scripts_count) {
+		NSLOG(netsurf, WARNING,
+		      "Sync script callback for unknown handle %p", script);
+		return NSERROR_OK;
+	}
 
 	switch (event->type) {
 	case CONTENT_MSG_DONE:
@@ -325,6 +337,9 @@ convert_script_sync_cb(hlcache_handle *script,
 			data = content_get_source_data(s->data.handle, &size );
 			script_handler(parent->jsthread, data, size,
 				       nsurl_access(hlcache_handle_get_url(s->data.handle)));
+
+			/* Rebuild box tree after post-parse JS */
+			html_js_reflow(parent);
 		}
 
 		/* continue parse */
@@ -552,6 +567,9 @@ exec_inline_script(html_content *c, dom_node *node, dom_string *mimetype)
 			       (const uint8_t *)dom_string_data(script),
 			       dom_string_byte_length(script),
 			       "?inline script?");
+
+		/* Rebuild box tree after post-parse inline JS */
+		html_js_reflow(c);
 	}
 	return DOM_HUBBUB_OK;
 }

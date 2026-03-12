@@ -298,6 +298,11 @@ bool html_saw_insecure_scripts(html_content *htmlc);
  */
 nserror html_proceed_to_done(html_content *html);
 
+/**
+ * Rebuild box tree from DOM and relayout after JS mutations.
+ */
+nserror html_js_reflow(html_content *htmlc);
+
 
 /* in html/redraw.c */
 bool html_redraw(struct content *c, struct content_redraw_data *data,

@@ -67,6 +67,7 @@
 #include "html/box.h"
 #include "html/box_construct.h"
 #include "html/box_inspect.h"
+#include "html/box_manipulate.h"
 #include "html/form_internal.h"
 #include "html/imagemap.h"
 #include "html/layout.h"
@@ -300,6 +301,73 @@ html_proceed_to_done(html_content *html)
 		break;
 	}
 	return NSERROR_UNKNOWN;
+}
+
+
+/* exported function documented in html/private.h */
+nserror
+html_js_reflow(html_content *htmlc)
+{
+	dom_node *html;
+	dom_exception exc;
+	nserror error;
+
+	if (htmlc->base.status != CONTENT_STATUS_DONE)
+		return NSERROR_OK;
+
+	/* Cancel any pending async box conversion */
+	if (htmlc->box_conversion_context != NULL) {
+		cancel_dom_to_box(htmlc->box_conversion_context);
+		htmlc->box_conversion_context = NULL;
+	}
+
+	/* Rebuild CSS selection context (picks up className changes) */
+	if (htmlc->select_ctx != NULL) {
+		css_select_ctx_destroy(htmlc->select_ctx);
+		htmlc->select_ctx = NULL;
+	}
+	error = html_css_new_selection_context(htmlc, &htmlc->select_ctx);
+	if (error != NSERROR_OK) {
+		NSLOG(netsurf, WARNING, "JS reflow: CSS context failed: %d",
+		      error);
+		return error;
+	}
+
+	/* Discard old box tree (intentional leak: box nodes reference
+	 * the old CSS selection context which was just destroyed) */
+	htmlc->layout = NULL;
+	htmlc->bctx = NULL;
+
+	/* Get root element */
+	exc = dom_document_get_document_element(htmlc->document,
+						(void *)&html);
+	if (exc != DOM_NO_ERR || html == NULL) {
+		NSLOG(netsurf, WARNING, "JS reflow: no root element");
+		return NSERROR_DOM;
+	}
+
+	/* Synchronous DOM to box tree rebuild */
+	error = dom_to_box_sync(html, htmlc);
+	dom_node_unref(html);
+	if (error != NSERROR_OK) {
+		NSLOG(netsurf, WARNING, "JS reflow: box rebuild failed: %d",
+		      error);
+		return error;
+	}
+
+	/* Layout the new box tree */
+	if (htmlc->layout != NULL) {
+		layout_document(htmlc, htmlc->base.available_width,
+				htmlc->base.available_height);
+	}
+
+	/* Trigger redraw via CONTENT_MSG_REFORMAT */
+	{
+		union content_msg_data data;
+		data.background = false;
+		content_broadcast(&htmlc->base, CONTENT_MSG_REFORMAT, &data);
+	}
+	return NSERROR_OK;
 }
 
 
