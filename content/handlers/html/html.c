@@ -53,6 +53,7 @@
 #include "desktop/selection.h"
 #include "desktop/scrollbar.h"
 #include "desktop/textarea.h"
+#include "desktop/frames.h"
 #include "netsurf/bitmap.h"
 #include "javascript/js.h"
 #include "desktop/gui_internal.h"
@@ -289,6 +290,11 @@ html_proceed_to_done(html_content *html)
 	case CONTENT_STATUS_READY:
 		if (html->base.active == 0) {
 			content_set_done(&html->base);
+			/* Process any dynamic iframes that were created
+			 * by JS during the loading phase. Now that we're
+			 * DONE, html_js_reflow will rebuild the box tree
+			 * and create browser_windows for new iframes. */
+			html_js_reflow(html);
 			return NSERROR_OK;
 		}
 		break;
@@ -359,6 +365,42 @@ html_js_reflow(html_content *htmlc)
 	if (htmlc->layout != NULL) {
 		layout_document(htmlc, htmlc->base.available_width,
 				htmlc->base.available_height);
+	}
+
+	/* Create browser_windows for any new iframes found during
+	 * box tree rebuild. Only process iframes that don't already
+	 * have a browser_window (box->iframe == NULL). Uses standalone
+	 * heap bw's that don't depend on bw->iframes array. */
+	if (htmlc->bw != NULL && htmlc->iframe != NULL) {
+		struct content_html_iframe *cur;
+		for (cur = htmlc->iframe; cur != NULL; cur = cur->next) {
+			if (cur->box != NULL &&
+					cur->box->iframe == NULL &&
+					cur->url != NULL) {
+				struct browser_window *ibw = NULL;
+				browser_window_create_iframe_dynamic(
+					htmlc->bw, cur->url,
+					cur->box->node, &ibw);
+				if (ibw != NULL) {
+					/* Store bw on DOM node for
+					 * contentDocument Path 2 */
+					dom_string *ukey;
+					dom_exception exc;
+					exc = dom_string_create(
+						(const uint8_t *)
+						"__ns_iframe_bw",
+						14, &ukey);
+					if (exc == DOM_NO_ERR) {
+						void *prev = NULL;
+						dom_node_set_user_data(
+							cur->box->node,
+							ukey, ibw,
+							NULL, &prev);
+						dom_string_unref(ukey);
+					}
+				}
+			}
+		}
 	}
 
 	/* Trigger redraw via CONTENT_MSG_REFORMAT */
