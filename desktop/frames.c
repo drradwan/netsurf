@@ -226,6 +226,9 @@ nserror browser_window_create_iframe_dynamic(
 		return ret;
 	}
 
+	NSLOG(jserrors, WARNING, "IFRAME_TRACE: navigate ret=%d bw=%p url=%s",
+	      ret, (void *)iframe_bw, nsurl_access(url));
+
 	if (out_bw) *out_bw = iframe_bw;
 	return NSERROR_OK;
 }

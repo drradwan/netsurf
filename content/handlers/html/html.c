@@ -361,6 +361,9 @@ html_js_reflow(html_content *htmlc)
 		return error;
 	}
 
+	NSLOG(jserrors, WARNING, "IFRAME_TRACE: reflow done, iframe=%p bw=%p status=%d",
+	      (void *)htmlc->iframe, (void *)htmlc->bw, htmlc->base.status);
+
 	/* Layout the new box tree */
 	if (htmlc->layout != NULL) {
 		layout_document(htmlc, htmlc->base.available_width,
@@ -373,6 +376,13 @@ html_js_reflow(html_content *htmlc)
 	 * heap bw's that don't depend on bw->iframes array. */
 	if (htmlc->bw != NULL && htmlc->iframe != NULL) {
 		struct content_html_iframe *cur;
+		{
+			int count = 0;
+			struct content_html_iframe *tmp;
+			for (tmp = htmlc->iframe; tmp != NULL; tmp = tmp->next) count++;
+			NSLOG(jserrors, WARNING, "IFRAME_TRACE: %d iframe descriptors, bw=%p",
+			      count, (void *)htmlc->bw);
+		}
 		for (cur = htmlc->iframe; cur != NULL; cur = cur->next) {
 			if (cur->box != NULL &&
 					cur->box->iframe == NULL &&
@@ -382,6 +392,8 @@ html_js_reflow(html_content *htmlc)
 					htmlc->bw, cur->url,
 					cur->box->node, &ibw);
 				if (ibw != NULL) {
+					NSLOG(jserrors, WARNING, "IFRAME_TRACE: created standalone bw=%p for node=%p url=%s",
+					      (void *)ibw, (void *)cur->box->node, nsurl_access(cur->url));
 					/* Store bw on DOM node for
 					 * contentDocument Path 2 */
 					dom_string *ukey;

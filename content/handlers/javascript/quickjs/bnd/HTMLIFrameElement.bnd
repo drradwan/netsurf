@@ -26,18 +26,46 @@ getter HTMLIFrameElement::contentDocument()
 	dom_node *node = ((node_private_t *)priv)->node;
 	if (node == NULL) return JS_NULL;
 
+	/* Path 1: iframe loaded during HTML parsing (has box + browser_window) */
 	struct box *box = box_for_node(node);
-	if (box == NULL || box->iframe == NULL) return JS_NULL;
+	if (box != NULL && box->iframe != NULL) {
+		struct hlcache_handle *h =
+			browser_window_get_content(box->iframe);
+		if (h != NULL && content_get_type(h) == CONTENT_HTML) {
+			dom_document *doc = html_get_document(h);
+			if (doc != NULL)
+				return qjsw_push_node(ctx,
+					(struct dom_node *)doc);
+		}
+	}
 
-	struct hlcache_handle *h = browser_window_get_content(box->iframe);
-	if (h == NULL) return JS_NULL;
-	if (content_get_type(h) != CONTENT_HTML)
-		return JS_NULL;
+	/* Path 2: dynamically-inserted iframe (standalone browser_window
+	 * stored as user data by html_process_inserted_iframe) */
+	{
+		dom_string *key;
+		dom_exception exc;
+		void *user_data = NULL;
 
-	dom_document *doc = html_get_document(h);
-	if (doc == NULL) return JS_NULL;
+		exc = dom_string_create(
+			(const uint8_t *)"__ns_iframe_bw", 14, &key);
+		if (exc == DOM_NO_ERR) {
+			dom_node_get_user_data(node, key, &user_data);
+			dom_string_unref(key);
+		}
+		if (user_data != NULL) {
+			struct hlcache_handle *h =
+				browser_window_get_content(
+					(struct browser_window *)user_data);
+			if (h != NULL && content_get_type(h) == CONTENT_HTML) {
+				dom_document *doc = html_get_document(h);
+				if (doc != NULL)
+					return qjsw_push_node(ctx,
+						(struct dom_node *)doc);
+			}
+		}
+	}
 
-	return qjsw_push_node(ctx, (struct dom_node *)doc);
+	return JS_NULL;
 %}
 
 getter HTMLIFrameElement::align();

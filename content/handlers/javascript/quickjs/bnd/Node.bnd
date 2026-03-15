@@ -415,7 +415,7 @@ method Node::insertBefore()
 
 	dom_node *before = NULL;
 
-	if (argc == 2) {
+	if (argc == 2 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
 		if (!qjsw_instanceof(ctx, argv[1], "node")) return JS_UNDEFINED;
 		node_private_t *another = JS_GetOpaqueAny(argv[1]);
 		if (another != NULL) before = another->node;

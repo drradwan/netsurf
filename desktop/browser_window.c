@@ -969,6 +969,9 @@ browser_window_content_done(struct browser_window *bw)
 				     browser_window_refresh, bw);
 	}
 
+	NSLOG(jserrors, WARNING, "IFRAME_TRACE: content_done bw=%p iframe_node=%p type=%d",
+	      (void *)bw, (void *)bw->iframe_node, bw->browser_window_type);
+
 	/* Fire load event on iframe element for dynamic iframes */
 	if (bw->iframe_node != NULL &&
 			bw->parent != NULL &&

@@ -37,88 +37,12 @@ setter HTMLTableElement::summary();
 getter HTMLTableElement::width();
 setter HTMLTableElement::width();
 
-getter HTMLTableElement::caption()
-%{
-	dom_html_table_caption_element *cap = NULL;
-	dom_exception exc = dom_html_table_element_get_caption(
-		(dom_html_table_element *)((node_private_t *)priv)->node, &cap);
-	if (exc != DOM_NO_ERR || cap == NULL) return JS_NULL;
-	JSValue ret = qjsw_push_node(ctx, (dom_node *)cap);
-	dom_node_unref(cap);
-	return ret;
-%}
-
-getter HTMLTableElement::tHead()
-%{
-	dom_html_table_section_element *sec = NULL;
-	dom_exception exc = dom_html_table_element_get_t_head(
-		(dom_html_table_element *)((node_private_t *)priv)->node, &sec);
-	if (exc != DOM_NO_ERR || sec == NULL) return JS_NULL;
-	JSValue ret = qjsw_push_node(ctx, (dom_node *)sec);
-	dom_node_unref(sec);
-	return ret;
-%}
-
-getter HTMLTableElement::tFoot()
-%{
-	dom_html_table_section_element *sec = NULL;
-	dom_exception exc = dom_html_table_element_get_t_foot(
-		(dom_html_table_element *)((node_private_t *)priv)->node, &sec);
-	if (exc != DOM_NO_ERR || sec == NULL) return JS_NULL;
-	JSValue ret = qjsw_push_node(ctx, (dom_node *)sec);
-	dom_node_unref(sec);
-	return ret;
-%}
-
-getter HTMLTableElement::tBodies()
-%{
-	dom_html_collection *coll = NULL;
-	dom_exception exc = dom_html_table_element_get_t_bodies(
-		(dom_html_table_element *)((node_private_t *)priv)->node, &coll);
-	if (exc != DOM_NO_ERR || coll == NULL) return JS_UNDEFINED;
-	JSValue coll_args[1];
-	coll_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)coll);
-	JSValue coll_obj = qjsw_create_object(ctx, "html_collection", 1, coll_args);
-	JS_FreeValue(ctx, coll_args[0]);
-	dom_html_collection_unref(coll);
-	if (JS_IsException(coll_obj)) return JS_UNDEFINED;
-	JSValue gen_fn = qjsw_push_generics(ctx, "makeListProxy");
-	if (!JS_IsFunction(ctx, gen_fn)) {
-		JS_FreeValue(ctx, gen_fn);
-		return coll_obj;
-	}
-	JSValue call_args[1] = { coll_obj };
-	JSValue result = qjsw_pcall(ctx, gen_fn, JS_UNDEFINED, 1, call_args, false);
-	JS_FreeValue(ctx, gen_fn);
-	JS_FreeValue(ctx, coll_obj);
-	if (JS_IsException(result)) return JS_UNDEFINED;
-	return result;
-%}
-
-getter HTMLTableElement::rows()
-%{
-	dom_html_collection *coll = NULL;
-	dom_exception exc = dom_html_table_element_get_rows(
-		(dom_html_table_element *)((node_private_t *)priv)->node, &coll);
-	if (exc != DOM_NO_ERR || coll == NULL) return JS_UNDEFINED;
-	JSValue coll_args[1];
-	coll_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)coll);
-	JSValue coll_obj = qjsw_create_object(ctx, "html_collection", 1, coll_args);
-	JS_FreeValue(ctx, coll_args[0]);
-	dom_html_collection_unref(coll);
-	if (JS_IsException(coll_obj)) return JS_UNDEFINED;
-	JSValue gen_fn = qjsw_push_generics(ctx, "makeListProxy");
-	if (!JS_IsFunction(ctx, gen_fn)) {
-		JS_FreeValue(ctx, gen_fn);
-		return coll_obj;
-	}
-	JSValue call_args[1] = { coll_obj };
-	JSValue result = qjsw_pcall(ctx, gen_fn, JS_UNDEFINED, 1, call_args, false);
-	JS_FreeValue(ctx, gen_fn);
-	JS_FreeValue(ctx, coll_obj);
-	if (JS_IsException(result)) return JS_UNDEFINED;
-	return result;
-%}
+/* caption, tHead, tFoot, tBodies, rows — native getters removed.
+ * The JS polyfill in qjscore.c (A4 block) provides these via DOM
+ * child-walk, which handles dynamically-created elements correctly.
+ * Native getters from nsgenbind would shadow the polyfill on the
+ * same prototype, and the polyfill's delete+defineProperty cannot
+ * reliably replace them in QuickJS. */
 
 method HTMLTableElement::createCaption()
 %{
