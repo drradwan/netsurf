@@ -400,6 +400,8 @@ static nserror browser_window_start_throbber(struct browser_window *bw)
 	while (bw->parent)
 		bw = bw->parent;
 
+	if (bw->window == NULL)
+		return NSERROR_OK;
 	return guit->window->event(bw->window, GW_EVENT_START_THROBBER);
 }
 
@@ -419,7 +421,7 @@ static nserror browser_window_stop_throbber(struct browser_window *bw)
 		bw = bw->parent;
 	}
 
-	if (!browser_window_check_throbber(bw)) {
+	if (!browser_window_check_throbber(bw) && bw->window != NULL) {
 		res = guit->window->event(bw->window, GW_EVENT_STOP_THROBBER);
 	}
 	return res;
@@ -454,7 +456,8 @@ browser_window_favicon_callback(hlcache_handle *c,
 		/* content_get_bitmap on the hlcache_handle should give
 		 *   the favicon bitmap at this point
 		 */
-		guit->window->set_icon(bw->window, c);
+		if (bw->window != NULL)
+			guit->window->set_icon(bw->window, c);
 		break;
 
 	case CONTENT_MSG_ERROR:
@@ -1837,6 +1840,8 @@ static void scheduled_reformat(void *vbw)
 	int height;
 	nserror res;
 
+	if (bw->window == NULL)
+		return;
 	res = guit->window->get_dimensions(bw->window, &width, &height);
 	if (res == NSERROR_OK) {
 		browser_window_reformat(bw, false, width, height);
@@ -4206,7 +4211,8 @@ void browser_window_set_status(struct browser_window *bw, const char *text)
 	}
 
 	bw->status.miss++;
-	guit->window->set_status(bw->window, bw->status.text);
+	if (bw->window != NULL)
+		guit->window->set_status(bw->window, bw->status.text);
 }
 
 
