@@ -104,6 +104,9 @@ struct flex_ctx {
 	bool main_reversed;
 	enum css_flex_wrap_e wrap;
 
+	int main_gap;
+	int cross_gap;
+
 	struct flex_items {
 		size_t count;
 		struct flex_item_data *data;
@@ -432,20 +435,26 @@ static struct flex_line_data *layout_flex__build_line(struct flex_ctx *ctx,
 		struct flex_item_data *item = &ctx->item.data[item_index];
 		struct box *b = item->box;
 		int pos_main;
+		int gap_extra;
 
 		pos_main = ctx->horizontal ?
 				item->main_size :
 				b->height + lh__delta_outer_main(ctx->flex, b);
 
+		gap_extra = (used_main > 0 &&
+				!lh__box_is_absolute(item->box)) ?
+				ctx->main_gap : 0;
+
 		if (ctx->wrap == CSS_FLEX_WRAP_NOWRAP ||
-		    pos_main + used_main <= ctx->available_main ||
+		    pos_main + used_main + gap_extra <=
+				ctx->available_main ||
 		    lh__box_is_absolute(item->box) ||
 		    ctx->available_main == AUTO ||
 		    line->count == 0 ||
 		    pos_main == 0) {
 			if (lh__box_is_absolute(item->box) == false) {
 				line->main_size += item->main_size;
-				used_main += pos_main;
+				used_main += pos_main + gap_extra;
 
 				if (b->margin[start_side] == AUTO) {
 					line->main_auto_margin_count++;
@@ -812,6 +821,7 @@ static bool layout_flex__place_line_items_main(
 	size_t item_count = line->first + line->count;
 	int extra_remainder = 0;
 	int extra = 0;
+	bool placed_first_item = false;
 
 	if (ctx->main_reversed) {
 		main_pos = lh__box_size_main(ctx->horizontal, ctx->flex) -
@@ -853,6 +863,13 @@ static bool layout_flex__place_line_items_main(
 		box_pos_main = ctx->horizontal ? &b->x : &b->y;
 
 		if (!lh__box_is_absolute(b)) {
+			if (placed_first_item && ctx->main_gap > 0) {
+				main_pos += ctx->main_reversed ?
+						-ctx->main_gap :
+						ctx->main_gap;
+			}
+			placed_first_item = true;
+
 			if (b->margin[main_start] == AUTO) {
 				extra_pre = extra + extra_remainder;
 			}
@@ -923,6 +940,9 @@ static bool layout_flex__collect_items_into_lines(
 			return false;
 		}
 
+		if (ctx->line.count > 1) {
+			ctx->cross_size += ctx->cross_gap;
+		}
 		ctx->cross_size += line->cross_size;
 		if (ctx->main_size < line->main_size) {
 			ctx->main_size = line->main_size;
@@ -1020,7 +1040,9 @@ static void layout_flex__place_lines(struct flex_ctx *ctx)
 
 	for (size_t i = 0; i < ctx->line.count; i++) {
 		struct flex_line_data *line = &ctx->line.data[i];
+		int gap_offset = (i > 0) ? ctx->cross_gap : 0;
 
+		line_pos += reversed ? -gap_offset : gap_offset;
 		line_pos += pre_multiplier * line->cross_size;
 		line->pos = line_pos;
 		line_pos += post_multiplier * line->cross_size +
@@ -1073,6 +1095,37 @@ bool layout_flex(struct box *flex, int available_width,
 	} else {
 		ctx->available_main = ctx->flex->height;
 		ctx->available_cross = available_width;
+	}
+
+	{
+		css_fixed gap_len = 0;
+		css_unit gap_unit = CSS_UNIT_PX;
+		int col_gap = 0;
+		int row_gap = 0;
+
+		if (css_computed_column_gap(flex->style,
+				&gap_len, &gap_unit) == CSS_COLUMN_GAP_SET) {
+			col_gap = FIXTOINT(css_unit_len2device_px(
+					flex->style, ctx->unit_len_ctx,
+					gap_len, gap_unit));
+		}
+
+		gap_len = 0;
+		gap_unit = CSS_UNIT_PX;
+		if (css_computed_row_gap(flex->style,
+				&gap_len, &gap_unit) == CSS_ROW_GAP_SET) {
+			row_gap = FIXTOINT(css_unit_len2device_px(
+					flex->style, ctx->unit_len_ctx,
+					gap_len, gap_unit));
+		}
+
+		if (ctx->horizontal) {
+			ctx->main_gap = col_gap;
+			ctx->cross_gap = row_gap;
+		} else {
+			ctx->main_gap = row_gap;
+			ctx->cross_gap = col_gap;
+		}
 	}
 
 	NSLOG(flex, DEEPDEBUG, "box %p: available_main: %i",

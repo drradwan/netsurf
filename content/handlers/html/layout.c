@@ -139,7 +139,32 @@ layout_get_object_dimensions(struct box *box,
 	assert(box->object != NULL);
 	assert(width != NULL && height != NULL);
 
-	if (*width == AUTO && *height == AUTO) {
+	if (*width != AUTO && *height != AUTO) {
+		/* Both dimensions are specified (e.g. width from CSS
+		 * percentage, height from HTML attribute hint).
+		 * Recompute height to preserve intrinsic aspect ratio.
+		 * This is only reached when REPLACE_DIM is not set,
+		 * meaning at least one dimension involved a percentage
+		 * or was resolved from a non-fixed CSS value. */
+		int intrinsic_width = content_get_width(box->object);
+		int intrinsic_height = content_get_height(box->object);
+
+		if (min_width >  0 && min_width > *width)
+			*width = min_width;
+		if (max_width >= 0 && max_width < *width)
+			*width = max_width;
+
+		if (intrinsic_width != 0 && intrinsic_height != 0) {
+			*height = (*width * intrinsic_height) /
+					intrinsic_width;
+		}
+
+		if (min_height >  0 && min_height > *height)
+			*height = min_height;
+		if (max_height >= 0 && max_height < *height)
+			*height = max_height;
+
+	} else if (*width == AUTO && *height == AUTO) {
 		/* No given dimensions */
 
 		bool scaled = false;
@@ -185,15 +210,26 @@ layout_get_object_dimensions(struct box *box,
 
 	} else if (*width == AUTO) {
 		/* Have given height; width is calculated from the given height
-		 * and ratio of intrinsic dimensions */
-		int intrinsic_width = content_get_width(box->object);
-		int intrinsic_height = content_get_height(box->object);
+		 * and ratio of intrinsic/CSS dimensions */
+		css_fixed ar_w, ar_h;
+		uint8_t ar_type = css_computed_aspect_ratio(box->style,
+				&ar_w, &ar_h);
 
-		if (intrinsic_height != 0)
-			*width = (*height * intrinsic_width) /
-					intrinsic_height;
-		else
-			*width = intrinsic_width;
+		if (ar_type == CSS_ASPECT_RATIO_RATIO &&
+				ar_w > 0 && ar_h > 0) {
+			*width = (*height * FIXTOINT(ar_w)) /
+					FIXTOINT(ar_h);
+		} else {
+			int intrinsic_width = content_get_width(box->object);
+			int intrinsic_height = content_get_height(
+					box->object);
+
+			if (intrinsic_height != 0)
+				*width = (*height * intrinsic_width) /
+						intrinsic_height;
+			else
+				*width = intrinsic_width;
+		}
 
 		if (min_width >  0 && min_width > *width)
 			*width = min_width;
@@ -202,20 +238,31 @@ layout_get_object_dimensions(struct box *box,
 
 	} else if (*height == AUTO) {
 		/* Have given width; height is calculated from the given width
-		 * and ratio of intrinsic dimensions */
-		int intrinsic_width = content_get_width(box->object);
-		int intrinsic_height = content_get_height(box->object);
+		 * and ratio of intrinsic/CSS dimensions */
+		css_fixed ar_w, ar_h;
+		uint8_t ar_type = css_computed_aspect_ratio(box->style,
+				&ar_w, &ar_h);
 
 		if (min_width >  0 && min_width > *width)
 			*width = min_width;
 		if (max_width >= 0 && max_width < *width)
 			*width = max_width;
 
-		if (intrinsic_width != 0)
-			*height = (*width * intrinsic_height) /
-					intrinsic_width;
-		else
-			*height = intrinsic_height;
+		if (ar_type == CSS_ASPECT_RATIO_RATIO &&
+				ar_w > 0 && ar_h > 0) {
+			*height = (*width * FIXTOINT(ar_h)) /
+					FIXTOINT(ar_w);
+		} else {
+			int intrinsic_width = content_get_width(box->object);
+			int intrinsic_height = content_get_height(
+					box->object);
+
+			if (intrinsic_width != 0)
+				*height = (*width * intrinsic_height) /
+						intrinsic_width;
+			else
+				*height = intrinsic_height;
+		}
 	}
 }
 
@@ -488,6 +535,7 @@ layout_minmax_line(struct box *first,
 
 	*line_has_height = false;
 
+
 	/* corresponds to the pass 1 loop in layout_line() */
 	for (b = first; b; b = b->next) {
 		enum css_width_e wtype;
@@ -518,6 +566,8 @@ layout_minmax_line(struct box *first,
 			if (min < b->min_width)
 				min = b->min_width;
 			max += b->max_width;
+			NSLOG(netsurf, WARNING, "MMFLOAT|b=%p|type=%d|b_min=%d|b_max=%d|min=%d|max=%d",
+				b, b->type, b->min_width, b->max_width, min, max);
 			continue;
 		}
 
@@ -552,11 +602,18 @@ layout_minmax_line(struct box *first,
 			*line_has_height = true;
 			/* \todo  update min width, consider fractional extra */
 		} else if (b->type == BOX_INLINE_END) {
+			int max_before = max;
 			fixed = frac = 0;
-			calculate_mbp_width(&content->unit_len_ctx,
-					b->inline_end->style, RIGHT,
-					true, true, true,
-					&fixed, &frac);
+			/* Only add RIGHT MBP for non-replaced inlines. Replaced
+			 * inlines already include both L+R MBP in their width
+			 * (computed in the replaced inline path below). */
+			if (b->inline_end->object == NULL &&
+					!(b->inline_end->flags & REPLACE_DIM)) {
+				calculate_mbp_width(&content->unit_len_ctx,
+						b->inline_end->style, RIGHT,
+						true, true, true,
+						&fixed, &frac);
+			}
 			if (0 < fixed)
 				max += fixed;
 
@@ -567,6 +624,8 @@ layout_minmax_line(struct box *first,
 				}
 				max += b->space;
 			}
+			NSLOG(netsurf, WARNING, "MMINLINE_END|b=%p|inline_start=%p|fixed=%d|space=%d|max_before=%d|max=%d",
+				b, b->inline_end, fixed, b->space, max_before, max);
 
 			*line_has_height = true;
 			continue;
@@ -729,6 +788,8 @@ layout_minmax_line(struct box *first,
 						true, true, true,
 						&fixed, &frac);
 			}
+			if (b->object && fixed != 0) {
+			}
 			if (0 < width + fixed)
 				width += fixed;
 		} else if (b->flags & IFRAME) {
@@ -774,7 +835,17 @@ layout_minmax_line(struct box *first,
 		if (width > 0)
 			max += width;
 
+
 		*line_has_height = true;
+
+		/* If this replaced inline was split into opening/closing boxes
+		 * (has an inline_end), skip directly to the closing box. This
+		 * prevents double-counting the right MBP (already included in
+		 * width above) and prevents fallback children from contributing
+		 * to the min/max width. The loop's b = b->next then advances
+		 * past the closing box. */
+		if (b->inline_end)
+			b = b->inline_end;
 	}
 
 	if (first_line) {
@@ -782,6 +853,8 @@ layout_minmax_line(struct box *first,
 		/* todo: handle text-indent interaction with floats */
 		int text_indent = layout_text_indent(&content->unit_len_ctx,
 				first->parent->parent->style, 100);
+		if (text_indent != 0) {
+		}
 		min = (min + text_indent < 0) ? 0 : min + text_indent;
 		max = (max + text_indent < 0) ? 0 : max + text_indent;
 	}
@@ -789,6 +862,8 @@ layout_minmax_line(struct box *first,
 	*line_min = min;
 	*line_max = max;
 
+	if (max > 100) {
+	}
 	NSLOG(layout, DEBUG,  "line_min %i, line_max %i", min, max);
 
 	assert(b != first);
@@ -1019,6 +1094,11 @@ static void layout_minmax_block(
 					max = child->max_width;
 			}
 
+			if (child->max_width > 190 || max > 190) {
+				NSLOG(netsurf, WARNING, "MINMAX_CHILD|block=%p|child=%p|child_type=%d|child_min=%d|child_max=%d|running_min=%d|running_max=%d",
+					block, child, child->type, child->min_width, child->max_width, min, max);
+			}
+
 			if (child_has_height)
 				block->flags |= HAS_HEIGHT;
 		}
@@ -1121,6 +1201,10 @@ static void layout_minmax_block(
 
 	assert(0 <= block->min_width);
 	assert(block->min_width <= block->max_width);
+	if (block->min_width > 180 || block->max_width > 200) {
+		NSLOG(netsurf, WARNING, "MINMAX_RESULT|block=%p|min_w=%d|max_w=%d|extra_fixed=%d",
+			block, block->min_width, block->max_width, extra_fixed);
+	}
 }
 
 
@@ -2190,10 +2274,25 @@ static bool layout_apply_minmax_height(
 		enum css_height_e htype = CSS_HEIGHT_AUTO;
 		css_fixed value = 0;
 		css_unit unit = CSS_UNIT_PX;
+		int cb_height;
 
 		if (containing_block) {
 			htype = css_computed_height(containing_block->style,
 					&value, &unit);
+		}
+
+		/* CSS 2.1 §10.1: containing block for abs/fixed-pos is
+		 * the padding box (content + padding) */
+		cb_height = containing_block ? containing_block->height : 0;
+		if (containing_block &&
+				containing_block->height != AUTO &&
+				box->style != NULL &&
+				(css_computed_position(box->style) ==
+					CSS_POSITION_ABSOLUTE ||
+				 css_computed_position(box->style) ==
+					CSS_POSITION_FIXED)) {
+			cb_height += containing_block->padding[TOP] +
+					containing_block->padding[BOTTOM];
 		}
 
 		/* max-height */
@@ -2210,7 +2309,7 @@ static bool layout_apply_minmax_height(
 					 * specified height. (CSS 2.1
 					 * Section 10.5) */
 					h = FPCT_OF_INT_TOINT(value,
-						containing_block->height);
+						cb_height);
 					if (h < box->height) {
 						box->height = h;
 						updated = true;
@@ -2241,7 +2340,7 @@ static bool layout_apply_minmax_height(
 					 * specified height. (CSS 2.1
 					 * Section 10.5) */
 					h = FPCT_OF_INT_TOINT(value,
-						containing_block->height);
+						cb_height);
 					if (h > box->height) {
 						box->height = h;
 						updated = true;
@@ -2751,6 +2850,9 @@ layout_line(struct box *first,
 	x0 -= cx;
 	x1 -= cx;
 
+	if (first->object || (first->next && first->next->object)) {
+	}
+
 	if (indent)
 		x0 += layout_text_indent(&content->unit_len_ctx,
 				first->parent->parent->style, *width);
@@ -2979,6 +3081,19 @@ layout_line(struct box *first,
 			height = b->height;
 
 		x += b->width;
+
+		/* Replaced inline with inline_end: box_construct leaves
+		 * fallback children (e.g. "ERROR" text) in the box tree
+		 * even when the object loaded.  The right MBP was already
+		 * copied to the inline_end by the BOX_INLINE handler above.
+		 * Add it to x now and jump to the inline_end so the fallback
+		 * children are not measured as line content. */
+		if (b->inline_end) {
+			x += b->inline_end->padding[RIGHT] +
+					b->inline_end->border[RIGHT].width +
+					b->inline_end->margin[RIGHT];
+			b = b->inline_end;
+		}
 	}
 
 	/* find new sides using this height */
@@ -2988,6 +3103,9 @@ layout_line(struct box *first,
 			&left, &right);
 	x0 -= cx;
 	x1 -= cx;
+
+	if (*width < 200 && x1 < 200) {
+	}
 
 	if (indent)
 		x0 += layout_text_indent(&content->unit_len_ctx,
@@ -3031,6 +3149,14 @@ layout_line(struct box *first,
 			} else if (b->type == BOX_INLINE) {
 				b->x += b->margin[LEFT] + b->border[LEFT].width;
 				x = b->x + b->padding[LEFT] + b->width;
+				/* Replaced inline with inline_end: add right MBP and
+				 * skip fallback children (same reason as pass 1). */
+				if (lh__box_is_replace(b) && b->inline_end) {
+					x += b->inline_end->padding[RIGHT] +
+							b->inline_end->border[RIGHT].width +
+							b->inline_end->margin[RIGHT];
+					b = b->inline_end;
+				}
 			} else if (b->type == BOX_INLINE_END) {
 				b->height = b->inline_end->height;
 				x += b->padding[RIGHT] +
@@ -3358,6 +3484,11 @@ layout_line(struct box *first,
 				d->type == BOX_TEXT ||
 				d->type == BOX_INLINE_END) {
 			/* regular (non-replaced) inlines */
+			if (d->border[RIGHT].width > 0 || d->padding[LEFT] > 0 || d->padding[RIGHT] > 0) {
+				NSLOG(netsurf, WARNING,
+				    "PASS2NR type=%d obj=%p d_x=%d x0=%d x1=%d w=%d br=%d",
+				    (int)d->type, d->object, d->x, x0, x1, *width, d->border[RIGHT].width);
+			}
 			d->x += x0;
 			d->y = *y - d->padding[TOP];
 
@@ -3368,6 +3499,9 @@ layout_line(struct box *first,
 		} else if ((d->type == BOX_INLINE) ||
 				d->type == BOX_INLINE_BLOCK) {
 			/* replaced inlines and inline-blocks */
+			NSLOG(netsurf, WARNING,
+			    "PASS2 type=%d obj=%p d_x=%d x0=%d x1=%d w=%d",
+			    (int)d->type, d->object, d->x, x0, x1, *width);
 			d->x += x0;
 			d->y = *y + d->border[TOP].width + d->margin[TOP];
 			h = d->margin[TOP] + d->border[TOP].width +
@@ -3471,6 +3605,8 @@ static bool layout_inline_container(struct box *inline_container, int width,
 		struct box *cont, int cx, int cy, html_content *content)
 {
 	bool first_line = true;
+	if (width < 200) {
+	}
 	bool has_text_children;
 	struct box *c, *next;
 	int y = 0;
@@ -4594,7 +4730,7 @@ layout_absolute(struct box *box,
 	int *margin = box->margin;
 	int *padding = box->padding;
 	struct box_border *border = box->border;
-	int available_width = containing_block->width;
+	int available_width;
 	int space;
 
 	assert(box->type == BOX_BLOCK || box->type == BOX_TABLE ||
@@ -4619,6 +4755,10 @@ layout_absolute(struct box *box,
 		containing_block->height += containing_block->padding[TOP] +
 				containing_block->padding[BOTTOM];
 	}
+
+	/* CSS 2.1 §10.1: containing block for abs-pos is the padding box,
+	 * so percentage widths resolve against the padded width */
+	available_width = containing_block->width;
 
 	layout_compute_offsets(&content->unit_len_ctx, box, containing_block,
 			&top, &right, &bottom, &left);

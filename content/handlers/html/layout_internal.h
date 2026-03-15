@@ -545,6 +545,22 @@ static inline void layout_find_dimensions(
 		}
 	}
 
+	if (width && height) {
+		css_fixed ar_w, ar_h;
+		uint8_t ar_type = css_computed_aspect_ratio(style,
+				&ar_w, &ar_h);
+		if (ar_type == CSS_ASPECT_RATIO_RATIO &&
+				ar_w > 0 && ar_h > 0) {
+			if (*width == AUTO && *height != AUTO) {
+				*width = (*height * FIXTOINT(ar_w)) /
+						FIXTOINT(ar_h);
+			} else if (*height == AUTO && *width != AUTO) {
+				*height = (*width * FIXTOINT(ar_h)) /
+						FIXTOINT(ar_w);
+			}
+		}
+	}
+
 	if (max_width) {
 		enum css_max_width_e type;
 		css_fixed value = 0;

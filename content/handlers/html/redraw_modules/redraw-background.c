@@ -302,8 +302,88 @@ bool html_redraw_background(int x, int y, struct box *box, float scale,
 		}
 		/* and plot the image */
 		if (plot_content) {
-			width = content_get_width(background->background);
-			height = content_get_height(background->background);
+			int bg_iw = content_get_width(background->background);
+			int bg_ih = content_get_height(background->background);
+			int bg_w = bg_iw;
+			int bg_h = bg_ih;
+
+			/* Apply background-size */
+			{
+				css_fixed size_w = 0, size_h = 0;
+				css_unit unit_w = CSS_UNIT_PX;
+				css_unit unit_h = CSS_UNIT_PX;
+				uint8_t bg_size_type;
+
+				bg_size_type = css_computed_background_size(
+						background->style,
+						&size_w, &unit_w,
+						&size_h, &unit_h);
+
+				switch (bg_size_type) {
+				case CSS_BACKGROUND_SIZE_COVER:
+					if (bg_iw > 0 && bg_ih > 0) {
+						float sx = (float)width / bg_iw;
+						float sy = (float)height / bg_ih;
+						float s = (sx > sy) ? sx : sy;
+						bg_w = (int)(bg_iw * s);
+						bg_h = (int)(bg_ih * s);
+					}
+					break;
+				case CSS_BACKGROUND_SIZE_CONTAIN:
+					if (bg_iw > 0 && bg_ih > 0) {
+						float sx = (float)width / bg_iw;
+						float sy = (float)height / bg_ih;
+						float s = (sx < sy) ? sx : sy;
+						bg_w = (int)(bg_iw * s);
+						bg_h = (int)(bg_ih * s);
+					}
+					break;
+				case CSS_BACKGROUND_SIZE_SET:
+				{
+					bool w_auto = (unit_w == 0);
+					bool h_auto = (unit_h == 0);
+
+					if (!w_auto) {
+						if (unit_w == CSS_UNIT_PCT) {
+							bg_w = width *
+								FIXTOFLT(size_w) / 100.;
+						} else {
+							bg_w = (int)FIXTOFLT(
+								css_unit_len2device_px(
+								background->style,
+								unit_len_ctx,
+								size_w, unit_w));
+						}
+					}
+
+					if (!h_auto) {
+						if (unit_h == CSS_UNIT_PCT) {
+							bg_h = height *
+								FIXTOFLT(size_h) / 100.;
+						} else {
+							bg_h = (int)FIXTOFLT(
+								css_unit_len2device_px(
+								background->style,
+								unit_len_ctx,
+								size_h, unit_h));
+						}
+					}
+
+					if (w_auto && !h_auto && bg_ih > 0) {
+						bg_w = bg_iw * bg_h / bg_ih;
+					} else if (h_auto && !w_auto && bg_iw > 0) {
+						bg_h = bg_ih * bg_w / bg_iw;
+					}
+					break;
+				}
+				case CSS_BACKGROUND_SIZE_AUTO:
+				default:
+					break;
+				}
+			}
+
+			width = bg_w;
+			height = bg_h;
 
 			/* ensure clip area only as large as required */
 			if (!repeat_x) {
@@ -474,8 +554,89 @@ bool html_redraw_inline_background(int x, int y, struct box *box,
 	}
 	/* and plot the image */
 	if (plot_content) {
-		int width = content_get_width(box->background);
-		int height = content_get_height(box->background);
+		int bg_iw = content_get_width(box->background);
+		int bg_ih = content_get_height(box->background);
+		int width = bg_iw;
+		int height = bg_ih;
+		int box_w = b.x1 - b.x0;
+		int box_h = b.y1 - b.y0;
+
+		/* Apply background-size */
+		{
+			css_fixed size_w = 0, size_h = 0;
+			css_unit unit_w = CSS_UNIT_PX;
+			css_unit unit_h = CSS_UNIT_PX;
+			uint8_t bg_size_type;
+
+			bg_size_type = css_computed_background_size(
+					box->style,
+					&size_w, &unit_w,
+					&size_h, &unit_h);
+
+			switch (bg_size_type) {
+			case CSS_BACKGROUND_SIZE_COVER:
+				if (bg_iw > 0 && bg_ih > 0) {
+					float sx = (float)box_w / (bg_iw * scale);
+					float sy = (float)box_h / (bg_ih * scale);
+					float s = (sx > sy) ? sx : sy;
+					width = (int)(bg_iw * s);
+					height = (int)(bg_ih * s);
+				}
+				break;
+			case CSS_BACKGROUND_SIZE_CONTAIN:
+				if (bg_iw > 0 && bg_ih > 0) {
+					float sx = (float)box_w / (bg_iw * scale);
+					float sy = (float)box_h / (bg_ih * scale);
+					float s = (sx < sy) ? sx : sy;
+					width = (int)(bg_iw * s);
+					height = (int)(bg_ih * s);
+				}
+				break;
+			case CSS_BACKGROUND_SIZE_SET:
+			{
+				bool w_auto = (unit_w == 0);
+				bool h_auto = (unit_h == 0);
+
+				if (!w_auto) {
+					if (unit_w == CSS_UNIT_PCT) {
+						width = box_w *
+							FIXTOFLT(size_w) /
+							(100. * scale);
+					} else {
+						width = (int)FIXTOFLT(
+							css_unit_len2device_px(
+							box->style,
+							unit_len_ctx,
+							size_w, unit_w));
+					}
+				}
+
+				if (!h_auto) {
+					if (unit_h == CSS_UNIT_PCT) {
+						height = box_h *
+							FIXTOFLT(size_h) /
+							(100. * scale);
+					} else {
+						height = (int)FIXTOFLT(
+							css_unit_len2device_px(
+							box->style,
+							unit_len_ctx,
+							size_h, unit_h));
+					}
+				}
+
+				if (w_auto && !h_auto && bg_ih > 0) {
+					width = bg_iw * height / bg_ih;
+				} else if (h_auto && !w_auto && bg_iw > 0) {
+					height = bg_ih * width / bg_iw;
+				}
+				break;
+			}
+			case CSS_BACKGROUND_SIZE_AUTO:
+			default:
+				break;
+			}
+		}
 
 		if (!repeat_x) {
 			if (r.x0 < x)

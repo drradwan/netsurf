@@ -1192,6 +1192,50 @@ static void css_hint_width(
 	}
 }
 
+static void css_hint_aspect_ratio_img(
+		nscss_select_ctx *ctx,
+		dom_node *node)
+{
+	struct css_hint *hint = &hint_ctx.hints[hint_ctx.len];
+	dom_string *w_attr = NULL;
+	dom_string *h_attr = NULL;
+	dom_exception err;
+
+	err = dom_element_get_attribute(node,
+			corestring_dom_width, &w_attr);
+	if (err != DOM_NO_ERR || w_attr == NULL)
+		return;
+
+	err = dom_element_get_attribute(node,
+			corestring_dom_height, &h_attr);
+	if (err != DOM_NO_ERR || h_attr == NULL) {
+		dom_string_unref(w_attr);
+		return;
+	}
+
+	{
+		css_fixed w_val, h_val;
+		size_t w_consumed, h_consumed;
+
+		if (parse_number(
+				(const char *)dom_string_data(w_attr),
+				false, false, &w_val, &w_consumed) &&
+		    parse_number(
+				(const char *)dom_string_data(h_attr),
+				false, false, &h_val, &h_consumed) &&
+		    w_val > 0 && h_val > 0) {
+			hint->prop = CSS_PROP_ASPECT_RATIO;
+			hint->data.position.h.value = w_val;
+			hint->data.position.v.value = h_val;
+			hint->status = CSS_ASPECT_RATIO_RATIO;
+			css_hint_advance(&hint);
+		}
+	}
+
+	dom_string_unref(h_attr);
+	dom_string_unref(w_attr);
+}
+
 static void css_hint_height_width_textarea(
 		nscss_select_ctx *ctx,
 		dom_node *node)
@@ -1665,6 +1709,7 @@ css_error node_presentational_hint(void *pw, void *node,
 	case DOM_HTML_ELEMENT_TYPE_APPLET:
 	case DOM_HTML_ELEMENT_TYPE_IMG:
 		css_hint_margin_hspace_vspace(pw, node);
+		css_hint_aspect_ratio_img(pw, node);
 		fallthrough;
 	case DOM_HTML_ELEMENT_TYPE_EMBED:
 	case DOM_HTML_ELEMENT_TYPE_IFRAME:

@@ -108,6 +108,7 @@ static void nspng_setup_transforms(png_structp png_ptr, png_infop info_ptr)
 
 	if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS)) {
 		png_set_tRNS_to_alpha(png_ptr);
+		NSLOG(netsurf, INFO, "PNG_TRNS_DEBUG: tRNS found, calling tRNS_to_alpha ct=%d bd=%d", color_type, bit_depth);
 	}
 
 	if (bit_depth == 16) {
@@ -129,7 +130,13 @@ static void nspng_setup_transforms(png_structp png_ptr, png_infop info_ptr)
 		break;
 	}
 
-	if (!(color_type & PNG_COLOR_MASK_ALPHA)) {
+	if (!(color_type & PNG_COLOR_MASK_ALPHA) &&
+	    !png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS)) {
+		/* No alpha and no tRNS transparency: add opaque filler.
+		 * Do NOT add a filler when tRNS is present — png_set_tRNS_to_alpha
+		 * (above) will expand tRNS to a real alpha channel.  Adding an
+		 * 0xFF filler on top would overwrite those alpha values and make
+		 * tRNS-transparent pixels appear fully opaque. */
 		switch (bitmap_fmt.layout) {
 		case BITMAP_LAYOUT_A8R8G8B8: /* Fall through. */
 		case BITMAP_LAYOUT_A8B8G8R8:
@@ -572,6 +579,20 @@ static bool nspng_convert(struct content *c)
 
 	if (png_c->bitmap != NULL) {
 		bool opaque = bitmap_test_opaque(png_c->bitmap);
+		/* PNG_TRNS_DEBUG: dump raw pixel bytes of small bitmaps */
+		if (png_c->base.width <= 4 && png_c->base.height <= 4) {
+			uint8_t *buf = guit->bitmap->get_buffer(png_c->bitmap);
+			if (buf != NULL) {
+				int npx = png_c->base.width * png_c->base.height;
+				NSLOG(netsurf, INFO, "PNG_TRNS_DEBUG: %dx%d opaque=%d bytes: "
+				    "%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
+				    (int)png_c->base.width, (int)png_c->base.height, (int)opaque,
+				    npx>0?buf[0]:0, npx>0?buf[1]:0, npx>0?buf[2]:0, npx>0?buf[3]:0,
+				    npx>1?buf[4]:0, npx>1?buf[5]:0, npx>1?buf[6]:0, npx>1?buf[7]:0,
+				    npx>2?buf[8]:0, npx>2?buf[9]:0, npx>2?buf[10]:0, npx>2?buf[11]:0,
+				    npx>3?buf[12]:0, npx>3?buf[13]:0, npx>3?buf[14]:0, npx>3?buf[15]:0);
+			}
+		}
 		guit->bitmap->set_opaque(png_c->bitmap, opaque);
 		bitmap_format_to_client(png_c->bitmap, &(bitmap_fmt_t) {
 			.layout = bitmap_fmt.layout,

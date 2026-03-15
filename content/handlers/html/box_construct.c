@@ -319,8 +319,9 @@ box_construct_generate(dom_node *n,
 	enum css_display_e computed_display;
 	const css_computed_content_item *c_item;
 
-	/* Nothing to generate if the parent box is not a block */
-	if (box->type != BOX_BLOCK)
+	/* Generate pseudo-elements for block and flex containers */
+	if (box->type != BOX_BLOCK && box->type != BOX_FLEX &&
+			box->type != BOX_INLINE_FLEX)
 		return;
 
 	/* To determine if an element has a pseudo element, we select
@@ -336,8 +337,9 @@ box_construct_generate(dom_node *n,
 	/* create box for this element */
 	computed_display = ns_computed_display(style, box_is_root(n));
 	if (computed_display == CSS_DISPLAY_BLOCK ||
-			computed_display == CSS_DISPLAY_TABLE) {
-		/* currently only support block level boxes */
+			computed_display == CSS_DISPLAY_TABLE ||
+			computed_display == CSS_DISPLAY_INLINE ||
+			computed_display == CSS_DISPLAY_INLINE_BLOCK) {
 
 		/** \todo Not wise to drop const from the computed style */
 		gen = box_create(NULL, (css_computed_style *) style,
@@ -346,11 +348,53 @@ box_construct_generate(dom_node *n,
 			return;
 		}
 
-		/* set box type from computed display */
-		gen->type = box_map[ns_computed_display(
-				style, box_is_root(n))];
+		/* set box type from computed display;
+		 * treat inline as block for pseudo-elements */
+		gen->type = box_map[computed_display];
+		if (gen->type == BOX_INLINE)
+			gen->type = BOX_BLOCK;
 
 		box_add_child(box, gen);
+
+		/* Populate generated box with content items */
+		while (c_item->type != CSS_COMPUTED_CONTENT_NONE) {
+			if (c_item->type == CSS_COMPUTED_CONTENT_STRING) {
+				const char *str =
+					lwc_string_data(c_item->data.string);
+				size_t len =
+					lwc_string_length(c_item->data.string);
+
+				if (len > 0) {
+					struct box *ic, *tb;
+
+					ic = box_create(NULL, NULL, false,
+						NULL, NULL, NULL, NULL,
+						content->bctx);
+					if (ic == NULL)
+						return;
+
+					ic->type = BOX_INLINE_CONTAINER;
+					box_add_child(gen, ic);
+
+					tb = box_create(NULL,
+						(css_computed_style *) style,
+						false, NULL, NULL, NULL,
+						NULL, content->bctx);
+					if (tb == NULL)
+						return;
+
+					tb->type = BOX_TEXT;
+					tb->text = talloc_strdup(
+						content->bctx, str);
+					if (tb->text == NULL)
+						return;
+					tb->length = len;
+
+					box_add_child(ic, tb);
+				}
+			}
+			c_item++;
+		}
 	}
 }
 

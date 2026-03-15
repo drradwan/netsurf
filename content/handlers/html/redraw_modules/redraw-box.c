@@ -758,12 +758,100 @@ bool html_redraw_box(const html_content *html, struct box *box,
 		obj_data.repeat_x = false;
 		obj_data.repeat_y = false;
 
+		/* Apply object-fit to replaced elements */
+		if (box->style) {
+			uint8_t object_fit = css_computed_object_fit(
+					box->style);
+			if (object_fit != CSS_OBJECT_FIT_FILL) {
+				int iw = content_get_width(box->object);
+				int ih = content_get_height(box->object);
+				if (iw > 0 && ih > 0) {
+					int cw = width;
+					int ch = height;
+					int fw, fh;
+					switch (object_fit) {
+					case CSS_OBJECT_FIT_CONTAIN:
+						if (iw * ch > ih * cw) {
+							fw = cw;
+							fh = (cw * ih) / iw;
+						} else {
+							fh = ch;
+							fw = (ch * iw) / ih;
+						}
+						obj_data.x += (cw - fw) / 2;
+						obj_data.y += (ch - fh) / 2;
+						obj_data.width = fw;
+						obj_data.height = fh;
+						break;
+					case CSS_OBJECT_FIT_COVER:
+						if (iw * ch < ih * cw) {
+							fw = cw;
+							fh = (cw * ih) / iw;
+						} else {
+							fh = ch;
+							fw = (ch * iw) / ih;
+						}
+						obj_data.x += (cw - fw) / 2;
+						obj_data.y += (ch - fh) / 2;
+						obj_data.width = fw;
+						obj_data.height = fh;
+						break;
+					case CSS_OBJECT_FIT_NONE:
+						obj_data.x += (cw - iw) / 2;
+						obj_data.y += (ch - ih) / 2;
+						obj_data.width = iw;
+						obj_data.height = ih;
+						break;
+					case CSS_OBJECT_FIT_SCALE_DOWN:
+						if (iw <= cw && ih <= ch) {
+							obj_data.x += (cw-iw)/2;
+							obj_data.y += (ch-ih)/2;
+							obj_data.width = iw;
+							obj_data.height = ih;
+						} else {
+							if (iw * ch > ih * cw) {
+								fw = cw;
+								fh = (cw*ih)/iw;
+							} else {
+								fh = ch;
+								fw = (ch*iw)/ih;
+							}
+							obj_data.x += (cw-fw)/2;
+							obj_data.y += (ch-fh)/2;
+							obj_data.width = fw;
+							obj_data.height = fh;
+						}
+						break;
+					}
+				}
+			}
+		}
+
 		if (content_get_type(box->object) == CONTENT_HTML) {
 			obj_data.x /= scale;
 			obj_data.y /= scale;
 		}
 
-		if (!content_redraw(box->object, &obj_data, &r, ctx)) {
+		/* Tighten clip for non-fill object-fit */
+		struct rect obj_r = r;
+		bool obj_clip_set = false;
+		if (box->style && css_computed_object_fit(box->style) !=
+				CSS_OBJECT_FIT_FILL) {
+			int cx0 = x + padding_left;
+			int cy0 = y + padding_top;
+			int cx1 = cx0 + width;
+			int cy1 = cy0 + height;
+			if (cx0 > obj_r.x0) obj_r.x0 = cx0;
+			if (cy0 > obj_r.y0) obj_r.y0 = cy0;
+			if (cx1 < obj_r.x1) obj_r.x1 = cx1;
+			if (cy1 < obj_r.y1) obj_r.y1 = cy1;
+			if (obj_r.x0 < obj_r.x1 && obj_r.y0 < obj_r.y1) {
+				ctx->plot->clip(ctx, &obj_r);
+				obj_clip_set = true;
+			}
+		}
+
+		if (!content_redraw(box->object, &obj_data, &obj_r, ctx)) {
 			/* Show image fail */
 			/* Unicode (U+FFFC) 'OBJECT REPLACEMENT CHARACTER' */
 			const char *obj = "\xef\xbf\xbc";
@@ -795,6 +883,9 @@ bool html_redraw_box(const html_content *html, struct box *box,
 					    obj_x, y + padding_top + (int)(height * 0.75),
 					    obj, sizeof(obj) - 1) != NSERROR_OK)
 				return false;
+		}
+		if (obj_clip_set) {
+			ctx->plot->clip(ctx, &r);
 		}
 	} else if (tag_type == DOM_HTML_ELEMENT_TYPE_CANVAS &&
 		   box->node != NULL &&
