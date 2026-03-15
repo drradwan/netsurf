@@ -458,17 +458,23 @@ nserror js_newthread(jsheap *heap, void *win_priv, void *doc_priv,
 			"    };"
 			"  }"
 			""
-			"  /* Patch iframe.contentDocument — native getter"
-			"   * returns undefined (libdom stub). Delete it"
-			"   * and replace with a JS getter that creates"
-			"   * a fresh HTMLDocument on demand. */"
+			"  /* Patch iframe.contentDocument — native getter returns the"
+			"   * real loaded document when available (via box->iframe)."
+			"   * Fall back to a fake empty document for dynamically"
+			"   * created iframes that have no box tree entry. */"
 			"  try {"
 			"    var ifr = d.createElement('iframe');"
 			"    var ip = Object.getPrototypeOf(ifr);"
 			"    if (ip) {"
+			"      var nativeCD = Object.getOwnPropertyDescriptor(ip, 'contentDocument');"
+			"      var nativeCDGet = nativeCD && nativeCD.get ? nativeCD.get : null;"
 			"      delete ip.contentDocument;"
 			"      Object.defineProperty(ip, 'contentDocument', {"
 			"        get: function() {"
+			"          if (nativeCDGet) {"
+			"            var real = nativeCDGet.call(this);"
+			"            if (real) return real;"
+			"          }"
 			"          if (!this.__cd) {"
 			"            try { this.__cd = d.implementation.createHTMLDocument(''); }"
 			"            catch(e) { return null; }"
@@ -482,7 +488,7 @@ nserror js_newthread(jsheap *heap, void *win_priv, void *doc_priv,
 			"        get: function() {"
 			"          var cd = this.contentDocument;"
 			"          if (!cd) return null;"
-			"          return cd.defaultView;"
+			"          return cd.defaultView || {document: cd};"
 			"        },"
 			"        configurable: true"
 			"      });"
@@ -775,7 +781,7 @@ nserror js_newthread(jsheap *heap, void *win_priv, void *doc_priv,
 			"            var raw = origDataGet ? origDataGet.call(this) : this.getAttribute('data');"
 			"            if (!raw) return raw;"
 			"            if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return raw;"
-			"            var base = this.baseURI || d.baseURI || '';"
+			"            var base = this.baseURI || d.baseURI || (d.location&&d.location.href) || '';"
 			"            if (!base) return raw;"
 			"            var i = base.lastIndexOf('/');"
 			"            if (i >= 0) return base.substring(0, i + 1) + raw.replace(/^\\.\\//,'');"
@@ -859,9 +865,9 @@ nserror js_newthread(jsheap *heap, void *win_priv, void *doc_priv,
 			"        var origSet = checkedDesc.set;"
 			"        var origGet = checkedDesc.get;"
 			"        Object.defineProperty(p2, 'checked', {"
-			"          get: origGet,"
+			"          get: function() { if(this.__checkedDirty)return this.__checkedVal; return origGet?origGet.call(this):false; },"
 			"          set: function(v) {"
-			"            origSet.call(this, v);"
+			"            this.__checkedDirty=true;this.__checkedVal=!!v;origSet.call(this, v);"
 			"            if (v && this.type === 'radio' && this.name) {"
 			"              var form = this.parentNode;"
 			"              while(form && form.tagName !== 'FORM') form = form.parentNode;"
@@ -870,7 +876,7 @@ nserror js_newthread(jsheap *heap, void *win_priv, void *doc_priv,
 			"                var radios = container.getElementsByTagName('input');"
 			"                for(var ri=0;ri<radios.length;ri++)"
 			"                  if(radios[ri]!==this&&radios[ri].type==='radio'&&radios[ri].name===this.name)"
-			"                    origSet.call(radios[ri], false);"
+			"                    radios[ri].checked=false;"
 			"              }"
 			"            }"
 			"          },"
@@ -1015,9 +1021,7 @@ nserror js_newthread(jsheap *heap, void *win_priv, void *doc_priv,
 			"        return !!el.disabled;"
 			"      return false;"
 			"    }"
-			"    if (s===':checked') {"
-			"      return !!el.checked;"
-			"    }"
+			"    if (s===':checked') { var tn2=(el.tagName||'').toLowerCase();if(tn2==='input'){var tp=(el.type||'').toLowerCase();if(tp!=='checkbox'&&tp!=='radio')return false;}else if(tn2!=='option')return false;return !!el.checked; }"
 			"    if (s===':first-of-type'||s===':last-of-type'||s===':only-of-type') {"
 			"      var tn=el.tagName,p=el.parentNode;"
 			"      if (!p) return false;"
@@ -1611,12 +1615,32 @@ bool js_fire_event(jsthread *thread, const char *type,
 	ALOG_QJS("fire_event: %s (doc=%p, target=%p)", type, (void *)doc,
 		 (void *)target);
 
-	/* Only handle Window-targeted load events for now */
-	if (target != NULL)
-		return true;
-
 	if (strcmp(type, "load") != 0)
 		return true;
+
+	/* Element-targeted load events (e.g. iframe onload) */
+	if (target != NULL) {
+		JSContext *ctx = thread->ctx;
+		JSValue node = qjsw_push_node(ctx, target);
+		if (!JS_IsUndefined(node)) {
+			/* Fire inline onload handler */
+			JSValue handler = JS_GetPropertyStr(ctx, node, "onload");
+			if (JS_IsFunction(ctx, handler)) {
+				JSValue event_obj = JS_NewObject(ctx);
+				JS_SetPropertyStr(ctx, event_obj, "type",
+					JS_NewString(ctx, "load"));
+				JS_SetPropertyStr(ctx, event_obj, "target",
+					JS_DupValue(ctx, node));
+				JSValue result = qjsw_pcall(ctx, handler,
+					node, 1, &event_obj, true);
+				JS_FreeValue(ctx, result);
+				JS_FreeValue(ctx, event_obj);
+			}
+			JS_FreeValue(ctx, handler);
+		}
+		JS_FreeValue(ctx, node);
+		return true;
+	}
 
 	exc = dom_event_create(&evt);
 	if (exc != DOM_NO_ERR) return true;

@@ -8,7 +8,37 @@
  *         http://www.opensource.org/licenses/mit-license
  */
 
+class HTMLIFrameElement {
+	prologue %{
+#include "netsurf/content.h"
+#include "netsurf/browser_window.h"
+#include "content/hlcache.h"
+#include "html/box.h"
+#include "html/box_construct.h"
+#include "html/html_save.h"
+%};
+};
+
 init HTMLIFrameElement(struct dom_html_element *html_iframe_element::html_element);
+
+getter HTMLIFrameElement::contentDocument()
+%{
+	dom_node *node = ((node_private_t *)priv)->node;
+	if (node == NULL) return JS_NULL;
+
+	struct box *box = box_for_node(node);
+	if (box == NULL || box->iframe == NULL) return JS_NULL;
+
+	struct hlcache_handle *h = browser_window_get_content(box->iframe);
+	if (h == NULL) return JS_NULL;
+	if (content_get_type(h) != CONTENT_HTML)
+		return JS_NULL;
+
+	dom_document *doc = html_get_document(h);
+	if (doc == NULL) return JS_NULL;
+
+	return qjsw_push_node(ctx, (struct dom_node *)doc);
+%}
 
 getter HTMLIFrameElement::align();
 setter HTMLIFrameElement::align();
