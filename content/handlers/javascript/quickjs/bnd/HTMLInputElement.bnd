@@ -1,0 +1,133 @@
+/* HTML input element binding using duktape and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init HTMLInputElement(struct dom_html_element *html_input_element::html_element);
+
+getter HTMLInputElement::accept();
+setter HTMLInputElement::accept();
+
+getter HTMLInputElement::align();
+setter HTMLInputElement::align();
+
+getter HTMLInputElement::alt();
+setter HTMLInputElement::alt();
+
+getter HTMLInputElement::checked();
+setter HTMLInputElement::checked();
+
+getter HTMLInputElement::defaultChecked();
+setter HTMLInputElement::defaultChecked();
+
+getter HTMLInputElement::defaultValue();
+setter HTMLInputElement::defaultValue();
+
+getter HTMLInputElement::disabled();
+setter HTMLInputElement::disabled();
+
+getter HTMLInputElement::name();
+setter HTMLInputElement::name();
+
+getter HTMLInputElement::readOnly();
+setter HTMLInputElement::readOnly();
+
+getter HTMLInputElement::src();
+setter HTMLInputElement::src();
+
+getter HTMLInputElement::useMap();
+setter HTMLInputElement::useMap();
+
+getter HTMLInputElement::valueAsNumber();
+setter HTMLInputElement::valueAsNumber();
+
+getter HTMLInputElement::valueHigh();
+setter HTMLInputElement::valueHigh();
+
+getter HTMLInputElement::valueLow();
+setter HTMLInputElement::valueLow();
+
+getter HTMLInputElement::value()
+%{
+	/* The value IDL attribute returns the current value, NOT the content
+	 * attribute.  We store it as __input_value on the JS object. */
+	JSValue stored = JS_GetPropertyStr(ctx, this_val, "__input_value");
+	if (!JS_IsUndefined(stored))
+		return stored;
+	JS_FreeValue(ctx, stored);
+
+	/* Fallback: return the content attribute (initial/default value) */
+	dom_string *val = NULL;
+	dom_html_input_element_get_value(
+		(dom_html_input_element *)((node_private_t *)priv)->node, &val);
+	if (val == NULL)
+		return JS_NewString(ctx, "");
+	JSValue ret = QJSB_PUSH_STRING(ctx, dom_string_data(val),
+					dom_string_length(val));
+	dom_string_unref(val);
+	return ret;
+%}
+
+setter HTMLInputElement::value()
+%{
+	/* Store on JS object — do NOT set the content attribute */
+	JS_SetPropertyStr(ctx, this_val, "__input_value",
+			  JS_DupValue(ctx, val));
+	return JS_UNDEFINED;
+%}
+
+getter HTMLInputElement::maxLength();
+setter HTMLInputElement::maxLength();
+
+getter HTMLInputElement::size();
+setter HTMLInputElement::size();
+
+getter HTMLInputElement::type()
+%{
+	/* HTML spec: input.type returns lowercase; default is "text" */
+	dom_string *val = NULL;
+	dom_html_input_element_get_type(
+		(dom_html_input_element *)((node_private_t *)priv)->node, &val);
+	if (val == NULL || dom_string_length(val) == 0) {
+		if (val) dom_string_unref(val);
+		return JS_NewString(ctx, "text");
+	}
+	size_t len = dom_string_length(val);
+	const char *src = dom_string_data(val);
+	char lc[32];
+	if (len < sizeof(lc)) {
+		for (size_t i = 0; i < len; i++)
+			lc[i] = (src[i] >= 'A' && src[i] <= 'Z') ? src[i] + 32 : src[i];
+		lc[len] = '\0';
+		dom_string_unref(val);
+		return JS_NewStringLen(ctx, lc, len);
+	}
+	JSValue ret = QJSB_PUSH_STRING(ctx, src, len);
+	dom_string_unref(val);
+	return ret;
+%}
+
+setter HTMLInputElement::type()
+%{
+	/* libdom has no set_type, use setAttribute("type", val) */
+	if (((node_private_t *)priv)->node == NULL) return JS_UNDEFINED;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, val, &slen);
+	if (s == NULL) return JS_UNDEFINED;
+	dom_string *attr_name = NULL, *attr_val = NULL;
+	dom_exception exc;
+	exc = dom_string_create((const uint8_t *)"type", 4, &attr_name);
+	if (exc != DOM_NO_ERR) { JS_FreeCString(ctx, s); return JS_UNDEFINED; }
+	exc = dom_string_create((const uint8_t *)s, slen, &attr_val);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) { dom_string_unref(attr_name); return JS_UNDEFINED; }
+	dom_element_set_attribute((dom_element *)((node_private_t *)priv)->node, attr_name, attr_val);
+	dom_string_unref(attr_name);
+	dom_string_unref(attr_val);
+	return JS_UNDEFINED;
+%}

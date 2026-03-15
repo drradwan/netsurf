@@ -1,0 +1,32 @@
+/* HTML button element binding using duktape and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init HTMLButtonElement(struct dom_html_element *html_button_element::html_element);
+
+getter HTMLButtonElement::disabled();
+setter HTMLButtonElement::disabled();
+getter HTMLButtonElement::name();
+setter HTMLButtonElement::name();
+getter HTMLButtonElement::type()
+%{
+	/* Auto-gen returns empty string for unset attribute; HTML spec default is "submit" */
+	dom_string *val = NULL;
+	dom_html_button_element_get_type(
+		(dom_html_button_element *)((node_private_t *)priv)->node, &val);
+	if (val == NULL || dom_string_length(val) == 0) {
+		if (val) dom_string_unref(val);
+		return JS_NewString(ctx, "submit");
+	}
+	JSValue ret = QJSB_PUSH_STRING(ctx, dom_string_data(val), dom_string_length(val));
+	dom_string_unref(val);
+	return ret;
+%}
+getter HTMLButtonElement::value();
+setter HTMLButtonElement::value();

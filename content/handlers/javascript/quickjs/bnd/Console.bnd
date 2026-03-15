@@ -1,0 +1,296 @@
+/* Console binding for browser using QuickJS and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ * Copyright 2015 Daniel Silverstone <dsilvers@netsurf-browser.org>
+ * Copyright 2026 Senfoni Authors
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+class Console {
+      private unsigned int group;
+      prologue %{
+#include <nsutils/time.h>
+#include "netsurf/browser_window.h"
+
+#define CONSOLE_TIMERS "__NSQJS_ConsoleTimers__"
+
+static void
+write_log_entry(JSContext *ctx, unsigned int group, browser_window_console_flags flags,
+		int argc, JSValueConst *argv)
+{
+	/* Call consoleFormatter generic to format the arguments */
+	JSValue formatter = qjsw_push_generics(ctx, "consoleFormatter");
+	if (JS_IsUndefined(formatter)) {
+		/* No formatter available, fall through to raw concat */
+		JS_FreeValue(ctx, formatter);
+	} else {
+		JSValue result = qjsw_pcall(ctx, formatter, JS_UNDEFINED,
+					    argc, argv, false);
+		JS_FreeValue(ctx, formatter);
+		if (JS_IsException(result)) {
+			JS_FreeValue(ctx, result);
+			/* Failed to convert, fall back to a fixed message */
+			const char *fallback = "Oh dear, formatter went banananas";
+			JSValue global = QJSB_GLOBAL(ctx);
+			JSValue priv_val = JS_GetPropertyStr(ctx, global, "__NSQJS_WIN_PRIV__");
+			int64_t _p; JS_ToInt64(ctx, &_p, priv_val);
+			window_private_t *priv_win = (window_private_t *)(void*)(uintptr_t)_p;
+			JS_FreeValue(ctx, priv_val);
+			QJSB_FREE(ctx, global);
+
+			if (priv_win == NULL || priv_win->win == NULL || priv_win->closed_down == true ||
+			    browser_window_console_log(priv_win->win, BW_CS_SCRIPT_CONSOLE,
+						       fallback, strlen(fallback),
+						       flags) != NSERROR_OK) {
+				NSLOG(netsurf, DEBUG, "Unable to log: %s", fallback);
+			}
+			return;
+		}
+		/* Use the formatted result: convert to string and log it */
+		size_t msglen;
+		const char *msg = JS_ToCStringLen(ctx, &msglen, result);
+		JS_FreeValue(ctx, result);
+		if (msg != NULL) {
+			/* Build indentation prefix */
+			char prefix[64];
+			unsigned int plen = 0;
+			for (unsigned int u = 0; u < group && plen < sizeof(prefix) - 1; ++u) {
+				prefix[plen++] = ' ';
+			}
+
+			/* Allocate combined buffer */
+			char *buf = malloc(plen + msglen + 1);
+			if (buf != NULL) {
+				memcpy(buf, prefix, plen);
+				memcpy(buf + plen, msg, msglen);
+				buf[plen + msglen] = '\0';
+
+				JSValue global = QJSB_GLOBAL(ctx);
+				JSValue priv_val = JS_GetPropertyStr(ctx, global, "__NSQJS_WIN_PRIV__");
+				int64_t _p; JS_ToInt64(ctx, &_p, priv_val);
+				window_private_t *priv_win = (window_private_t *)(void*)(uintptr_t)_p;
+				JS_FreeValue(ctx, priv_val);
+				QJSB_FREE(ctx, global);
+
+				NSLOG(quickjs, INFO, "console: %s", buf);
+				if (priv_win == NULL || priv_win->win == NULL || priv_win->closed_down == true ||
+				    browser_window_console_log(priv_win->win, BW_CS_SCRIPT_CONSOLE,
+							       buf, plen + msglen,
+							       flags) != NSERROR_OK) {
+					NSLOG(netsurf, DEBUG, "Unable to log: %s", buf);
+				}
+				free(buf);
+			}
+			JS_FreeCString(ctx, msg);
+		}
+		return;
+	}
+
+	/* Fallback: concatenate all args as strings */
+	size_t total = 0;
+	char *buf = NULL;
+
+	/* Add group indentation */
+	for (unsigned int u = 0; u < group; ++u) {
+		char *nb = realloc(buf, total + 2);
+		if (nb == NULL) { free(buf); return; }
+		buf = nb;
+		buf[total++] = ' ';
+	}
+
+	for (int i = 0; i < argc; ++i) {
+		size_t slen;
+		const char *str = JS_ToCStringLen(ctx, &slen, argv[i]);
+		if (str == NULL) continue;
+		if (i > 0 || group > 0) {
+			/* space separator between args (or after indent) */
+		}
+		char *nb = realloc(buf, total + slen + 1);
+		if (nb == NULL) { JS_FreeCString(ctx, str); free(buf); return; }
+		buf = nb;
+		memcpy(buf + total, str, slen);
+		total += slen;
+		JS_FreeCString(ctx, str);
+	}
+
+	if (buf != NULL) {
+		buf[total] = '\0';
+	}
+
+	JSValue global = QJSB_GLOBAL(ctx);
+	JSValue priv_val = JS_GetPropertyStr(ctx, global, "__NSQJS_WIN_PRIV__");
+	int64_t _p; JS_ToInt64(ctx, &_p, priv_val);
+	window_private_t *priv_win = (window_private_t *)(void*)(uintptr_t)_p;
+	JS_FreeValue(ctx, priv_val);
+	QJSB_FREE(ctx, global);
+
+	if (priv_win == NULL || priv_win->win == NULL || priv_win->closed_down == true ||
+	    browser_window_console_log(priv_win->win, BW_CS_SCRIPT_CONSOLE,
+				       buf ? buf : "", total,
+				       flags) != NSERROR_OK) {
+		NSLOG(netsurf, DEBUG, "Unable to log: %s", buf ? buf : "");
+	}
+	free(buf);
+}
+
+%};
+};
+
+init Console ()
+%{
+	priv->group = 0;
+%}
+
+method Console::group ()
+%{
+	priv->group ++;
+	return JS_UNDEFINED;
+%}
+
+method Console::groupCollapsed ()
+%{
+	priv->group ++;
+	return JS_UNDEFINED;
+%}
+
+method Console::groupEnd ()
+%{
+	if (priv->group)
+		priv->group --;
+	return JS_UNDEFINED;
+%}
+
+method Console::info()
+%{
+	write_log_entry(ctx, priv->group, BW_CS_FLAG_LEVEL_INFO, argc, argv);
+	return JS_UNDEFINED;
+%}
+
+method Console::debug()
+%{
+	write_log_entry(ctx, priv->group, BW_CS_FLAG_LEVEL_DEBUG, argc, argv);
+	return JS_UNDEFINED;
+%}
+
+method Console::error()
+%{
+	write_log_entry(ctx, priv->group, BW_CS_FLAG_LEVEL_ERROR, argc, argv);
+	return JS_UNDEFINED;
+%}
+
+method Console::log()
+%{
+	write_log_entry(ctx, priv->group, BW_CS_FLAG_LEVEL_LOG, argc, argv);
+	return JS_UNDEFINED;
+%}
+
+method Console::warn()
+%{
+	write_log_entry(ctx, priv->group, BW_CS_FLAG_LEVEL_WARN, argc, argv);
+	return JS_UNDEFINED;
+%}
+
+method Console::dir()
+%{
+	write_log_entry(ctx, priv->group, BW_CS_FLAG_LEVEL_INFO, argc, argv);
+	return JS_UNDEFINED;
+%}
+
+method Console::time()
+%{
+	uint64_t time_ms = 0;
+
+	if (nsu_getmonotonic_ms(&time_ms) != NSUERROR_OK)
+		return JS_UNDEFINED;
+
+	if (argc < 1 || !JS_IsString(argv[0])) {
+		return JS_ThrowTypeError(ctx, "Console.time() takes a string");
+	}
+
+	const char *label = JS_ToCString(ctx, argv[0]);
+	if (label == NULL)
+		return JS_UNDEFINED;
+
+	/* Store timer value as a property on this_val's CONSOLE_TIMERS object */
+	JSValue timers = JS_GetPropertyStr(ctx, this_val, CONSOLE_TIMERS);
+	if (JS_IsUndefined(timers)) {
+		timers = JS_NewObject(ctx);
+		JS_SetPropertyStr(ctx, this_val, CONSOLE_TIMERS, JS_DupValue(ctx, timers));
+	}
+	JS_SetPropertyStr(ctx, timers, label, JS_NewUint32(ctx, (uint32_t)time_ms));
+	JS_FreeValue(ctx, timers);
+	JS_FreeCString(ctx, label);
+
+	return JS_UNDEFINED;
+%}
+
+method Console::timeEnd()
+%{
+	uint64_t time_ms = 0;
+	uint64_t old_time_ms = 0;
+
+	if (nsu_getmonotonic_ms(&time_ms) != NSUERROR_OK)
+		return JS_UNDEFINED;
+
+	if (argc < 1 || !JS_IsString(argv[0])) {
+		return JS_ThrowTypeError(ctx, "Console.timeEnd() takes a string");
+	}
+
+	const char *label = JS_ToCString(ctx, argv[0]);
+	if (label == NULL)
+		return JS_UNDEFINED;
+
+	JSValue timers = JS_GetPropertyStr(ctx, this_val, CONSOLE_TIMERS);
+	if (JS_IsUndefined(timers)) {
+		JS_FreeCString(ctx, label);
+		return JS_UNDEFINED;
+	}
+
+	JSValue old_val = JS_GetPropertyStr(ctx, timers, label);
+	if (JS_IsUndefined(old_val)) {
+		old_time_ms = time_ms;
+	} else {
+		uint32_t v;
+		JS_ToUint32(ctx, &v, old_val);
+		old_time_ms = v;
+	}
+	JS_FreeValue(ctx, old_val);
+
+	/* Delete the timer */
+	JSAtom atom = JS_NewAtom(ctx, label);
+	JS_DeleteProperty(ctx, timers, atom, 0);
+	JS_FreeAtom(ctx, atom);
+	JS_FreeValue(ctx, timers);
+
+	/* Build log message: "label: NNN ms" */
+	char msg[256];
+	int msglen = snprintf(msg, sizeof(msg), "%s: %u ms",
+			      label, (unsigned int)(time_ms - old_time_ms));
+	JS_FreeCString(ctx, label);
+
+	JSValue msg_argv[1];
+	msg_argv[0] = JS_NewStringLen(ctx, msg, msglen);
+	write_log_entry(ctx, priv->group, BW_CS_FLAG_LEVEL_INFO, 1, msg_argv);
+	JS_FreeValue(ctx, msg_argv[0]);
+
+	return JS_UNDEFINED;
+%}
+
+method Console::trace ()
+%{
+	/* Get a stack trace by creating and inspecting an Error object */
+	JSValue err = JS_NewError(ctx);
+	JSValue stack = JS_GetPropertyStr(ctx, err, "stack");
+	JS_FreeValue(ctx, err);
+
+	JSValue trace_argv[1];
+	trace_argv[0] = stack;
+	write_log_entry(ctx, priv->group, BW_CS_FLAG_LEVEL_INFO, 1, trace_argv);
+	JS_FreeValue(ctx, stack);
+
+	return JS_UNDEFINED;
+%}

@@ -1,0 +1,159 @@
+/* DOMTokenList binding for browser using QuickJS and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+class DOMTokenList {
+	private struct dom_tokenlist *tokens;
+};
+
+init DOMTokenList(struct dom_tokenlist *tokens)
+%{
+	priv->tokens = tokens;
+	dom_tokenlist_ref(tokens);
+%}
+
+fini DOMTokenList()
+%{
+	dom_tokenlist_unref(priv->tokens);
+%}
+
+getter DOMTokenList::length()
+%{
+	dom_exception err;
+	uint32_t len;
+
+	err = dom_tokenlist_get_length(priv->tokens, &len);
+
+	if (err != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_UINT(ctx, (uint32_t)len);
+%}
+
+method DOMTokenList::item()
+%{
+	uint32_t i;
+	JS_ToUint32(ctx, &i, argv[0]);
+	dom_exception err;
+	dom_string *value;
+
+	err = dom_tokenlist_item(priv->tokens, i, &value);
+
+	if (err != DOM_NO_ERR) return JS_UNDEFINED;
+
+    if (value == NULL) {
+        return JS_NULL;
+    }
+
+    JSValue ret = QJSB_PUSH_STRING(ctx, dom_string_data(value), dom_string_length(value));
+	dom_string_unref(value);
+
+	return ret;
+%}
+
+method DOMTokenList::add()
+%{
+	dom_exception exc;
+	dom_string *value;
+	size_t slen;
+	const char *s;
+	int spos;
+
+	for (spos = 0; spos < argc; ++spos) {
+		s = QJSB_TO_CSTRING(ctx, argv[spos], &slen);
+
+		exc = dom_string_create_interned((const uint8_t *)s, slen, &value);
+		JS_FreeCString(ctx, s);
+		if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+		exc = dom_tokenlist_add(priv->tokens, value);
+		dom_string_unref(value);
+	}
+
+	return JS_UNDEFINED;
+%}
+
+method DOMTokenList::remove()
+%{
+	dom_exception exc;
+	dom_string *value;
+	size_t slen;
+	const char *s;
+	int spos;
+
+	for (spos = 0; spos < argc; ++spos) {
+		s = QJSB_TO_CSTRING(ctx, argv[spos], &slen);
+
+		exc = dom_string_create_interned((const uint8_t *)s, slen, &value);
+		JS_FreeCString(ctx, s);
+		if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+		exc = dom_tokenlist_remove(priv->tokens, value);
+		dom_string_unref(value);
+	}
+
+	return JS_UNDEFINED;
+%}
+
+method DOMTokenList::contains()
+%{
+	dom_exception exc;
+	dom_string *value;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, argv[0], &slen);
+	bool present = false;
+
+	exc = dom_string_create_interned((const uint8_t *)s, slen, &value);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	exc = dom_tokenlist_contains(priv->tokens, value, &present);
+	dom_string_unref(value);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_BOOL(ctx, present);
+%}
+
+method DOMTokenList::toggle()
+%{
+	dom_exception exc;
+	dom_string *value;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, argv[0], &slen);
+	bool toggle_set = argc > 1;
+	bool toggle = toggle_set ? JS_ToBool(ctx, argv[1]) : false;
+	bool present;
+
+	exc = dom_string_create_interned((const uint8_t *)s, slen, &value);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	exc = dom_tokenlist_contains(priv->tokens, value, &present);
+	if (exc != DOM_NO_ERR) {
+		dom_string_unref(value);
+		return JS_UNDEFINED;
+	}
+
+	/* Decision matrix is based on present, toggle_set, and toggle */
+	if (toggle_set) {
+		if (toggle) {
+			exc = dom_tokenlist_add(priv->tokens, value);
+		} else {
+			exc = dom_tokenlist_remove(priv->tokens, value);
+		}
+	} else {
+		if (present) {
+			exc = dom_tokenlist_add(priv->tokens, value);
+		} else {
+			exc = dom_tokenlist_remove(priv->tokens, value);
+		}
+	}
+	dom_string_unref(value);
+
+	return JS_UNDEFINED;
+%}

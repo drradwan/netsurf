@@ -1,0 +1,136 @@
+/* KeyboardEvent binding for browser using QuickJS and libdom
+ *
+ * Copyright 2019 Michael Drake <tlsa@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init KeyboardEvent (struct dom_keyboard_event *evt::ui_event);
+
+getter KeyboardEvent::key ()
+%{
+	dom_exception err;
+	dom_string *key;
+
+	err = dom_keyboard_event_get_key(priv->parent.parent.evt, &key);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	JSValue ret = QJSB_PUSH_STRING(ctx, dom_string_data(key), dom_string_length(key));
+	dom_string_unref(key);
+	return ret;
+%}
+
+getter KeyboardEvent::code ()
+%{
+	dom_exception err;
+	dom_string *code;
+
+	err = dom_keyboard_event_get_code(priv->parent.parent.evt, &code);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	JSValue ret = QJSB_PUSH_STRING(ctx, dom_string_data(code), dom_string_length(code));
+	dom_string_unref(code);
+	return ret;
+%}
+
+getter KeyboardEvent::location ()
+%{
+	dom_exception err;
+	dom_key_location location;
+
+	err = dom_keyboard_event_get_location(priv->parent.parent.evt,
+			&location);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	return QJSB_PUSH_UINT(ctx, (uint32_t) location);
+%}
+
+getter KeyboardEvent::ctrlKey ()
+%{
+	dom_exception err;
+	bool ctrl_key;
+
+	err = dom_keyboard_event_get_ctrl_key(priv->parent.parent.evt,
+			&ctrl_key);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	return QJSB_PUSH_BOOL(ctx, ctrl_key);
+%}
+
+getter KeyboardEvent::shiftKey ()
+%{
+	dom_exception err;
+	bool shift_key;
+
+	err = dom_keyboard_event_get_shift_key(priv->parent.parent.evt,
+			&shift_key);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	return QJSB_PUSH_BOOL(ctx, shift_key);
+%}
+
+getter KeyboardEvent::altKey ()
+%{
+	dom_exception err;
+	bool alt_key;
+
+	err = dom_keyboard_event_get_alt_key(priv->parent.parent.evt,
+			&alt_key);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	return QJSB_PUSH_BOOL(ctx, alt_key);
+%}
+
+getter KeyboardEvent::metaKey ()
+%{
+	dom_exception err;
+	bool meta_key;
+
+	err = dom_keyboard_event_get_meta_key(priv->parent.parent.evt,
+			&meta_key);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	return QJSB_PUSH_BOOL(ctx, meta_key);
+%}
+
+method KeyboardEvent::getModifierState ()
+%{
+	dom_string *modifier;
+	dom_exception err;
+	size_t slen;
+	const char *s;
+	bool state;
+
+	s = QJSB_TO_CSTRING(ctx, argv[0], &slen);
+	err = dom_string_create((const uint8_t *)s, slen, &modifier);
+	JS_FreeCString(ctx, s);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	err = dom_keyboard_event_get_modifier_state(priv->parent.parent.evt,
+			modifier, &state);
+	dom_string_unref(modifier);
+	if (err != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	return QJSB_PUSH_BOOL(ctx, state);
+%}

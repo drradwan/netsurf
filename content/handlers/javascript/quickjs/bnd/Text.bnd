@@ -1,0 +1,27 @@
+/* Text node binding using QuickJS and libdom */
+
+init Text(struct dom_node_character_data *character_data::character_data);
+
+method Text::splitText()
+%{
+	int32_t offset = 0;
+	if (argc > 0) JS_ToInt32(ctx, &offset, argv[0]);
+	dom_text *new_text = NULL;
+	dom_exception exc = dom_text_split_text(
+		(dom_text *)((node_private_t *)priv)->node,
+		(uint32_t)offset, &new_text);
+	if (exc != DOM_NO_ERR || new_text == NULL) return JS_NULL;
+	JSValue ret = qjsw_push_node(ctx, (dom_node *)new_text);
+	dom_node_unref(new_text);
+	return ret;
+%}
+
+getter Text::wholeText()
+%{
+	dom_string *val = NULL;
+	dom_text_get_whole_text((dom_text *)((node_private_t *)priv)->node, &val);
+	if (val == NULL) return JS_NewString(ctx, "");
+	JSValue ret = QJSB_PUSH_STRING(ctx, dom_string_data(val), dom_string_length(val));
+	dom_string_unref(val);
+	return ret;
+%}

@@ -1,0 +1,719 @@
+/* Element binding for browser using QuickJS and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ * Copyright 2026 Senfoni Authors
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+class Element {
+	prologue %{
+#include <utils/corestrings.h>
+#include <dom/bindings/hubbub/parser.h>
+%};
+};
+
+init Element(struct dom_element *element::node);
+
+getter Element::tagName()
+%{
+	/* Non-HTML namespace elements: use original qname from createElementNS
+	 * (libdom uppercases all names, but spec preserves case for non-HTML) */
+	JSValue qname = JS_GetPropertyStr(ctx, this_val, "__NSQJS_qname__");
+	if (!JS_IsUndefined(qname)) {
+		return qname;
+	}
+	JS_FreeValue(ctx, qname);
+
+	dom_string *name;
+	dom_exception exc;
+	exc = dom_node_get_node_name(((node_private_t *)priv)->node, &name);
+	if (exc != DOM_NO_ERR || name == NULL) return JS_UNDEFINED;
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(name), dom_string_length(name));
+	dom_string_unref(name);
+	return jsret;
+%}
+
+getter Element::localName()
+%{
+	/* Non-HTML namespace elements: extract local part from stored qname */
+	JSValue qname = JS_GetPropertyStr(ctx, this_val, "__NSQJS_qname__");
+	if (!JS_IsUndefined(qname)) {
+		size_t qlen;
+		const char *qstr = JS_ToCStringLen(ctx, &qlen, qname);
+		JS_FreeValue(ctx, qname);
+		if (qstr != NULL) {
+			const char *colon = memchr(qstr, ':', qlen);
+			if (colon != NULL) {
+				size_t local_off = colon - qstr + 1;
+				JSValue jsret = JS_NewStringLen(ctx, qstr + local_off, qlen - local_off);
+				JS_FreeCString(ctx, qstr);
+				return jsret;
+			}
+			JSValue jsret = JS_NewStringLen(ctx, qstr, qlen);
+			JS_FreeCString(ctx, qstr);
+			return jsret;
+		}
+	} else {
+		JS_FreeValue(ctx, qname);
+	}
+
+	dom_string *name;
+	dom_exception exc;
+	exc = dom_node_get_local_name(((node_private_t *)priv)->node, &name);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	/* Fallback: hubbub HTML parser may not set local_name separately;
+	 * use node_name (which is always set for elements) */
+	if (name == NULL) {
+		exc = dom_node_get_node_name(((node_private_t *)priv)->node, &name);
+		if (exc != DOM_NO_ERR || name == NULL) return JS_UNDEFINED;
+	}
+	const char *data = dom_string_data(name);
+	size_t len = dom_string_length(name);
+	/* HTML namespace elements: localName must be lowercase per spec */
+	dom_string *ns;
+	exc = dom_node_get_namespace(((node_private_t *)priv)->node, &ns);
+	if (exc == DOM_NO_ERR && ns != NULL) {
+		if (dom_string_isequal(ns, corestring_dom_html_namespace)) {
+			char *lower = alloca(len);
+			for (size_t i = 0; i < len; i++)
+				lower[i] = (data[i] >= 'A' && data[i] <= 'Z') ? data[i] + 32 : data[i];
+			JSValue jsret = QJSB_PUSH_STRING(ctx, lower, len);
+			dom_string_unref(ns);
+			dom_string_unref(name);
+			return jsret;
+		}
+		dom_string_unref(ns);
+	}
+	/* No namespace: lowercase for HTML documents */
+	char *lower = alloca(len);
+	for (size_t i = 0; i < len; i++)
+		lower[i] = (data[i] >= 'A' && data[i] <= 'Z') ? data[i] + 32 : data[i];
+	JSValue jsret = QJSB_PUSH_STRING(ctx, lower, len);
+	dom_string_unref(name);
+	return jsret;
+%}
+
+getter Element::namespaceURI()
+%{
+	dom_string *ns;
+	dom_exception exc;
+	exc = dom_node_get_namespace(((node_private_t *)priv)->node, &ns);
+	if (exc != DOM_NO_ERR || ns == NULL) return JS_NULL;
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(ns), dom_string_length(ns));
+	dom_string_unref(ns);
+	return jsret;
+%}
+
+getter Element::prefix()
+%{
+	/* Non-HTML namespace elements: extract prefix from stored qname */
+	JSValue qname = JS_GetPropertyStr(ctx, this_val, "__NSQJS_qname__");
+	if (!JS_IsUndefined(qname)) {
+		size_t qlen;
+		const char *qstr = JS_ToCStringLen(ctx, &qlen, qname);
+		JS_FreeValue(ctx, qname);
+		if (qstr != NULL) {
+			const char *colon = memchr(qstr, ':', qlen);
+			if (colon != NULL) {
+				JSValue jsret = JS_NewStringLen(ctx, qstr, colon - qstr);
+				JS_FreeCString(ctx, qstr);
+				return jsret;
+			}
+			JS_FreeCString(ctx, qstr);
+			return JS_NULL;
+		}
+	} else {
+		JS_FreeValue(ctx, qname);
+	}
+
+	dom_string *pfx;
+	dom_exception exc;
+	exc = dom_node_get_prefix(((node_private_t *)priv)->node, &pfx);
+	if (exc != DOM_NO_ERR || pfx == NULL) return JS_NULL;
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(pfx), dom_string_length(pfx));
+	dom_string_unref(pfx);
+	return jsret;
+%}
+
+getter Element::firstElementChild()
+%{
+	dom_node *element;
+	dom_exception exc;
+	dom_node_type node_type;
+	dom_node *next_node;
+
+	exc = dom_node_get_first_child(((node_private_t*)priv)->node, &element);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	while (element != NULL) {
+		exc = dom_node_get_node_type(element, &node_type);
+		if ((exc == DOM_NO_ERR) && (node_type == DOM_ELEMENT_NODE)) {
+			break;
+		}
+
+		exc = dom_node_get_next_sibling(element, &next_node);
+		dom_node_unref(element);
+		if (exc == DOM_NO_ERR) {
+			element = next_node;
+		} else {
+			element = NULL;
+		}
+	}
+	JSValue jsret = qjsw_push_node(ctx, (dom_node *)element);
+	if (JS_IsUndefined(jsret)) {
+		dom_node_unref(element);
+		return JS_UNDEFINED;
+	}
+	dom_node_unref(element);
+	return jsret;
+%}
+
+getter Element::lastElementChild()
+%{
+	dom_node *element;
+	dom_exception exc;
+	dom_node_type node_type;
+	dom_node *next_node;
+
+	exc = dom_node_get_last_child(((node_private_t*)priv)->node, &element);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	while (element != NULL) {
+		exc = dom_node_get_node_type(element, &node_type);
+		if ((exc == DOM_NO_ERR) && (node_type == DOM_ELEMENT_NODE)) {
+			break;
+		}
+
+		exc = dom_node_get_previous_sibling(element, &next_node);
+		dom_node_unref(element);
+		if (exc == DOM_NO_ERR) {
+			element = next_node;
+		} else {
+			element = NULL;
+		}
+	}
+	JSValue jsret = qjsw_push_node(ctx, (dom_node *)element);
+	if (JS_IsUndefined(jsret)) {
+		dom_node_unref(element);
+		return JS_UNDEFINED;
+	}
+	dom_node_unref(element);
+	return jsret;
+%}
+
+getter Element::previousElementSibling()
+%{
+	dom_node *element;
+	dom_exception exc;
+	dom_node_type node_type;
+	dom_node *sib_node;
+
+	exc = dom_node_get_previous_sibling(((node_private_t *)priv)->node, &element);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	while (element != NULL) {
+		exc = dom_node_get_node_type(element, &node_type);
+		if ((exc == DOM_NO_ERR) && (node_type == DOM_ELEMENT_NODE)) {
+			break;
+		}
+
+		exc = dom_node_get_previous_sibling(element, &sib_node);
+		dom_node_unref(element);
+		if (exc == DOM_NO_ERR) {
+			element = sib_node;
+		} else {
+			element = NULL;
+		}
+	}
+	JSValue jsret = qjsw_push_node(ctx, (dom_node *)element);
+	if (JS_IsUndefined(jsret)) {
+		dom_node_unref(element);
+		return JS_UNDEFINED;
+	}
+	dom_node_unref(element);
+	return jsret;
+%}
+
+getter Element::nextElementSibling()
+%{
+	dom_node *element;
+	dom_exception exc;
+	dom_node_type node_type;
+	dom_node *sib_node;
+
+	exc = dom_node_get_next_sibling(((node_private_t *)priv)->node, &element);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	while (element != NULL) {
+		exc = dom_node_get_node_type(element, &node_type);
+		if ((exc == DOM_NO_ERR) && (node_type == DOM_ELEMENT_NODE)) {
+			break;
+		}
+
+		exc = dom_node_get_next_sibling(element, &sib_node);
+		dom_node_unref(element);
+		if (exc == DOM_NO_ERR) {
+			element = sib_node;
+		} else {
+			element = NULL;
+		}
+	}
+	JSValue jsret = qjsw_push_node(ctx, (dom_node *)element);
+	if (JS_IsUndefined(jsret)) {
+		dom_node_unref(element);
+		return JS_UNDEFINED;
+	}
+	dom_node_unref(element);
+	return jsret;
+%}
+
+getter Element::childElementCount()
+%{
+	dom_node *element;
+	dom_exception exc;
+	dom_node_type node_type;
+	dom_node *next_node;
+	uint32_t jsret = 0;
+
+	exc = dom_node_get_first_child(((node_private_t *)priv)->node, &element);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	while (element != NULL) {
+		exc = dom_node_get_node_type(element, &node_type);
+		if ((exc == DOM_NO_ERR) && (node_type == DOM_ELEMENT_NODE)) {
+			jsret += 1;
+		}
+
+		exc = dom_node_get_next_sibling(element, &next_node);
+		dom_node_unref(element);
+		if (exc == DOM_NO_ERR) {
+			element = next_node;
+		} else {
+			element = NULL;
+		}
+	}
+	NSLOG(netsurf, INFO, "I found %u of them", jsret);
+	return QJSB_PUSH_UINT(ctx, jsret);
+%}
+
+method Element::getElementsByTagName ()
+%{
+	dom_nodelist *nlist = NULL;
+	dom_exception exc;
+	dom_string *tagname;
+	size_t len;
+	const char *str = QJSB_TO_CSTRING(ctx, argv[0], &len);
+	if (str == NULL) return JS_UNDEFINED;
+
+	exc = dom_string_create((const uint8_t *)str, len, &tagname);
+	JS_FreeCString(ctx, str);
+
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	exc = dom_element_get_elements_by_tag_name(priv->parent.node,
+						   tagname, &nlist);
+	dom_string_unref(tagname);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	JSValue nlist_args[1];
+	nlist_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)nlist);
+	JSValue nlist_obj = qjsw_create_object(ctx, "node_list", 1, nlist_args);
+	JS_FreeValue(ctx, nlist_args[0]);
+	dom_nodelist_unref(nlist);
+
+	if (JS_IsException(nlist_obj)) {
+		return JS_UNDEFINED;
+	}
+
+	JSValue gen_fn = qjsw_push_generics(ctx, "makeListProxy");
+	if (!JS_IsFunction(ctx, gen_fn)) {
+		JS_FreeValue(ctx, gen_fn);
+		return nlist_obj;
+	}
+
+	JSValue call_args[1] = { nlist_obj };
+	JSValue result = qjsw_pcall(ctx, gen_fn, JS_UNDEFINED, 1, call_args, false);
+	JS_FreeValue(ctx, gen_fn);
+	JS_FreeValue(ctx, nlist_obj);
+	if (JS_IsException(result)) {
+		return JS_UNDEFINED;
+	}
+
+	return result;
+%}
+
+getter Element::id ()
+%{
+	dom_string *idstr = NULL;
+	dom_exception exc;
+
+	exc = dom_element_get_attribute(priv->parent.node,
+					corestring_dom_id,
+					&idstr);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	if (idstr == NULL) {
+		return QJSB_PUSH_STRING(ctx, "", 0);
+	} else {
+		JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(idstr),
+				 dom_string_length(idstr));
+		dom_string_unref(idstr);
+		return jsret;
+	}
+%}
+
+setter Element::id ()
+%{
+	dom_string *idstr = NULL;
+	dom_exception exc;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, val, &slen);
+	if (s == NULL) return JS_UNDEFINED;
+
+	exc = dom_string_create((const uint8_t *)s, slen, &idstr);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	exc = dom_element_set_attribute(priv->parent.node,
+					corestring_dom_id,
+					idstr);
+	dom_string_unref(idstr);
+	return JS_UNDEFINED;
+%}
+
+
+method Element::removeAttribute()
+%{
+	dom_string *attr = NULL;
+	dom_exception exc;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, argv[0], &slen);
+	if (s == NULL) return JS_UNDEFINED;
+
+	exc = dom_string_create((const uint8_t *)s, slen, &attr);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	exc = dom_element_remove_attribute(priv->parent.node, attr);
+	dom_string_unref(attr);
+	return JS_UNDEFINED;
+%}
+
+method Element::getAttribute()
+%{
+	dom_string *attr_name = NULL;
+	dom_string *attr_value = NULL;
+	dom_exception exc;
+	size_t slen;
+
+	const char *s = QJSB_TO_CSTRING(ctx, argv[0], &slen);
+	if (s == NULL) return JS_UNDEFINED;
+	exc = dom_string_create((const uint8_t *)s, slen, &attr_name);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	exc = dom_element_get_attribute(priv->parent.node,
+			attr_name, &attr_value);
+	dom_string_unref(attr_name);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	if (attr_value == NULL) {
+		return JS_NULL;
+	} else {
+		JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(attr_value),
+				 dom_string_length(attr_value));
+		dom_string_unref(attr_value);
+		return jsret;
+	}
+%}
+
+method Element::setAttribute()
+%{
+	dom_exception exc;
+	dom_string *attr_str, *value_str;
+	size_t attr_len, value_len;
+	const char *attr = QJSB_TO_CSTRING(ctx, argv[0], &attr_len);
+	if (attr == NULL) return JS_UNDEFINED;
+	const char *value = QJSB_TO_CSTRING(ctx, argv[1], &value_len);
+	if (value == NULL) { JS_FreeCString(ctx, attr); return JS_UNDEFINED; }
+
+	exc = dom_string_create((const uint8_t *)attr, attr_len, &attr_str);
+	JS_FreeCString(ctx, attr);
+	if (exc != DOM_NO_ERR) { JS_FreeCString(ctx, value); return JS_UNDEFINED; }
+
+	exc = dom_string_create((const uint8_t *)value, value_len, &value_str);
+	JS_FreeCString(ctx, value);
+	if (exc != DOM_NO_ERR) {
+		dom_string_unref(attr_str);
+		return JS_UNDEFINED;
+	}
+
+	exc = dom_element_set_attribute(priv->parent.node,
+			attr_str, value_str);
+	dom_string_unref(attr_str);
+	dom_string_unref(value_str);
+	return JS_UNDEFINED;
+%}
+
+method Element::hasAttribute()
+%{
+	dom_string *attr_name = NULL;
+	dom_exception exc;
+	size_t slen;
+	bool res;
+
+	const char *s = QJSB_TO_CSTRING(ctx, argv[0], &slen);
+	if (s == NULL) return JS_UNDEFINED;
+	exc = dom_string_create((const uint8_t *)s, slen, &attr_name);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	exc = dom_element_has_attribute(priv->parent.node,
+			attr_name, &res);
+	dom_string_unref(attr_name);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	return QJSB_PUSH_BOOL(ctx, res);
+%}
+
+getter Element::className ()
+%{
+	dom_string *classstr = NULL;
+	dom_exception exc;
+
+	exc = dom_element_get_attribute(priv->parent.node,
+					corestring_dom_class,
+					&classstr);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	if (classstr == NULL) {
+		return QJSB_PUSH_STRING(ctx, "", 0);
+	} else {
+		JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(classstr),
+				 dom_string_length(classstr));
+		dom_string_unref(classstr);
+		return jsret;
+	}
+%}
+
+setter Element::className ()
+%{
+	dom_string *classstr = NULL;
+	dom_exception exc;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, val, &slen);
+	if (s == NULL) return JS_UNDEFINED;
+
+	exc = dom_string_create((const uint8_t *)s, slen, &classstr);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	exc = dom_element_set_attribute(priv->parent.node,
+					corestring_dom_class,
+					classstr);
+	dom_string_unref(classstr);
+	return JS_UNDEFINED;
+%}
+
+getter Element::classList ()
+%{
+	dom_exception exc;
+	dom_tokenlist *tokens;
+
+	JSValue cached = JS_GetPropertyStr(ctx, this_val, "__NSQJS_classList__");
+	if (!JS_IsUndefined(cached)) {
+		return cached;
+	}
+	JS_FreeValue(ctx, cached);
+
+	exc = dom_tokenlist_create((dom_element *)priv->parent.node, corestring_dom_class, &tokens);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	JSValue tok_args[1];
+	tok_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)tokens);
+	JSValue tok_obj = qjsw_create_object(ctx, "domsettabletokenlist", 1, tok_args);
+	JS_FreeValue(ctx, tok_args[0]);
+	dom_tokenlist_unref(tokens);
+	if (JS_IsException(tok_obj)) {
+		NSLOG(quickjs, DEBUG, "Unable to create DOMSettableTokenList object");
+		return JS_UNDEFINED;
+	}
+
+	JS_SetPropertyStr(ctx, this_val, "__NSQJS_classList__", JS_DupValue(ctx, tok_obj));
+	return tok_obj;
+%}
+
+getter Element::innerHTML()
+%{
+	return QJSB_PUSH_STRING(ctx, "", 0);
+%}
+
+setter Element::innerHTML()
+%{
+	size_t size;
+	const char *s = QJSB_TO_CSTRING(ctx, val, &size);
+	if (s == NULL) return JS_UNDEFINED;
+	dom_hubbub_parser_params parse_params;
+	dom_hubbub_error error;
+	dom_hubbub_parser *parser = NULL;
+	struct dom_document *doc = NULL;
+	struct dom_document_fragment *fragment = NULL;
+	dom_exception exc;
+	struct dom_node *child = NULL, *html = NULL, *body = NULL;
+	struct dom_nodelist *bodies = NULL;
+
+	exc = dom_node_get_owner_document(priv->parent.node, &doc);
+	if (exc != DOM_NO_ERR) goto out;
+
+	parse_params.enc = "UTF-8";
+	parse_params.fix_enc = true;
+	parse_params.enable_script = false;
+	parse_params.msg = NULL;
+	parse_params.script = NULL;
+	parse_params.ctx = NULL;
+	parse_params.daf = NULL;
+
+	error = dom_hubbub_fragment_parser_create(&parse_params,
+						  doc,
+						  &parser,
+						  &fragment);
+	if (error != DOM_HUBBUB_OK) {
+		NSLOG(netsurf, ERROR, "Unable to create fragment parser!");
+		goto out;
+	}
+
+	error = dom_hubbub_parser_parse_chunk(parser, (const uint8_t*)s, size);
+	if (error != DOM_HUBBUB_OK) {
+		NSLOG(netsurf, ERROR, "Unable to parse HTML chunk");
+		goto out;
+	}
+	error = dom_hubbub_parser_completed(parser);
+	if (error != DOM_HUBBUB_OK) {
+		NSLOG(netsurf, ERROR, "Unable to complete parser");
+		goto out;
+	}
+
+	exc = dom_node_get_first_child(priv->parent.node, &child);
+	if (exc != DOM_NO_ERR) goto out;
+	while (child != NULL) {
+		struct dom_node *cref;
+		exc = dom_node_remove_child(priv->parent.node, child, &cref);
+		if (exc != DOM_NO_ERR) goto out;
+		dom_node_unref(child);
+		child = NULL;
+		dom_node_unref(cref);
+		exc = dom_node_get_first_child(priv->parent.node, &child);
+		if (exc != DOM_NO_ERR) goto out;
+	}
+
+	exc = dom_node_get_first_child(fragment, &html);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_element_get_elements_by_tag_name(html, corestring_dom_BODY, &bodies);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_nodelist_item(bodies, 0, &body);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_node_get_first_child(body, &child);
+	if (exc != DOM_NO_ERR) goto out;
+	while (child != NULL) {
+		struct dom_node *cref;
+		exc = dom_node_remove_child(body, child, &cref);
+		if (exc != DOM_NO_ERR) goto out;
+		dom_node_unref(cref);
+		exc = dom_node_append_child(priv->parent.node, child, &cref);
+		if (exc != DOM_NO_ERR) goto out;
+		dom_node_unref(cref);
+		dom_node_unref(child);
+		child = NULL;
+		exc = dom_node_get_first_child(body, &child);
+		if (exc != DOM_NO_ERR) goto out;
+	}
+out:
+	JS_FreeCString(ctx, s);
+	if (parser != NULL) {
+		dom_hubbub_parser_destroy(parser);
+	}
+	if (doc != NULL) {
+		dom_node_unref(doc);
+	}
+	if (fragment != NULL) {
+		dom_node_unref(fragment);
+	}
+	if (child != NULL) {
+		dom_node_unref(child);
+	}
+	if (html != NULL) {
+		dom_node_unref(html);
+	}
+	if (bodies != NULL) {
+		dom_nodelist_unref(bodies);
+	}
+	if (body != NULL) {
+		dom_node_unref(body);
+	}
+	return JS_UNDEFINED;
+%}
+
+getter Element::attributes()
+%{
+	dom_exception exc;
+	dom_namednodemap *nmap = NULL;
+
+	JSValue cached = JS_GetPropertyStr(ctx, this_val, "__NSQJS_attributes__");
+	if (!JS_IsUndefined(cached)) {
+		return cached;
+	}
+	JS_FreeValue(ctx, cached);
+
+	exc = dom_node_get_attributes(priv->parent.node, &nmap);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	JSValue nmap_args[1];
+	nmap_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)nmap);
+	JSValue nmap_obj = qjsw_create_object(ctx, "named_node_map", 1, nmap_args);
+	JS_FreeValue(ctx, nmap_args[0]);
+	dom_namednodemap_unref(nmap);
+	if (JS_IsException(nmap_obj)) {
+		return JS_UNDEFINED;
+	}
+
+	JSValue gen_fn = qjsw_push_generics(ctx, "makeNodeMapProxy");
+	if (!JS_IsFunction(ctx, gen_fn)) {
+		JS_FreeValue(ctx, gen_fn);
+		JS_SetPropertyStr(ctx, this_val, "__NSQJS_attributes__", JS_DupValue(ctx, nmap_obj));
+		return nmap_obj;
+	}
+
+	JSValue call_args[1] = { nmap_obj };
+	JSValue result = qjsw_pcall(ctx, gen_fn, JS_UNDEFINED, 1, call_args, false);
+	JS_FreeValue(ctx, gen_fn);
+	JS_FreeValue(ctx, nmap_obj);
+	if (JS_IsException(result)) {
+		return JS_UNDEFINED;
+	}
+
+	JS_SetPropertyStr(ctx, this_val, "__NSQJS_attributes__", JS_DupValue(ctx, result));
+	return result;
+%}

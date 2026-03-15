@@ -1,0 +1,237 @@
+/* DOMImplementation binding for browser using QuickJS and libdom
+ *
+ * Copyright 2020 Daniel Silverstone <dsilvers@netsurf-browser.org>
+ * Copyright 2026 Senfoni Authors
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+prologue DOMImplementation ()
+%{
+#include "utils/corestrings.h"
+%}
+
+method DOMImplemention::hasFeature ()
+%{
+	return QJSB_PUSH_BOOL(ctx, true);
+%}
+
+method DOMImplementation::createDocumentType ()
+%{
+	struct dom_document_type *doctype = NULL;
+	dom_exception exc;
+	const char *qname = NULL, *pub = NULL, *sys = NULL;
+	size_t qname_len, pub_len, sys_len;
+
+	if (argc < 1) return JS_UNDEFINED;
+
+	qname = QJSB_TO_CSTRING(ctx, argv[0], &qname_len);
+	if (qname == NULL) return JS_UNDEFINED;
+
+	/* Validate qualifiedName per Namespaces in XML:
+	 * - must not be empty
+	 * - must not contain more than one ':'
+	 * - must not start or end with ':'
+	 * - segments around ':' must be valid NCNames (non-empty, start with
+	 *   letter or '_', no invalid chars)
+	 */
+	{
+		bool qn_invalid = false;
+		if (qname_len == 0) {
+			qn_invalid = true;
+		} else {
+			int colons = 0;
+			for (size_t qi = 0; qi < qname_len; qi++) {
+				if (qname[qi] == ':') colons++;
+			}
+			if (colons > 1 || qname[0] == ':' ||
+			    qname[qname_len - 1] == ':') {
+				qn_invalid = true;
+			}
+		}
+		if (qn_invalid) {
+			JS_FreeCString(ctx, qname);
+			/* Throw NAMESPACE_ERR (code 14) — build manually */
+			static const char src[] =
+				"(function(){var e=new DOMException(14,'NamespaceError');"
+				"e.code=14;return e;})()";
+			JSValue exc = JS_Eval(ctx, src, sizeof(src)-1,
+				"<ns>", JS_EVAL_TYPE_GLOBAL);
+			if (!JS_IsException(exc)) {
+				JS_Throw(ctx, exc);
+				return JS_EXCEPTION;
+			}
+			JS_FreeValue(ctx, exc);
+			return qjsw_throw_dom_exception(ctx, 14,
+				"Invalid qualified name");
+		}
+	}
+
+	if (argc > 1 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
+		pub = QJSB_TO_CSTRING(ctx, argv[1], &pub_len);
+	}
+
+	if (argc > 2 && !JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) {
+		sys = QJSB_TO_CSTRING(ctx, argv[2], &sys_len);
+	}
+
+	exc = dom_implementation_create_document_type(
+		qname, pub, sys, &doctype);
+
+	JS_FreeCString(ctx, qname);
+	if (pub != NULL) JS_FreeCString(ctx, pub);
+	if (sys != NULL) JS_FreeCString(ctx, sys);
+
+	if (exc != DOM_NO_ERR || doctype == NULL) return JS_UNDEFINED;
+
+	JSValue jsret = qjsw_push_node(ctx, (struct dom_node *)doctype);
+	dom_node_unref(doctype);
+	return jsret;
+%}
+
+method DOMImplementation::createDocument ()
+%{
+	struct dom_document_type *doctype = NULL;
+	struct dom_document *doc = NULL;
+	dom_exception exc;
+	const char *ns = NULL, *qn = NULL;
+	size_t ns_len, qn_len;
+
+	/* argv[0]: namespaceURI (nullable) */
+	if (argc > 0 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])) {
+		ns = QJSB_TO_CSTRING(ctx, argv[0], &ns_len);
+	}
+
+	/* argv[1]: qualifiedName (nullable) */
+	if (argc > 1 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
+		qn = QJSB_TO_CSTRING(ctx, argv[1], &qn_len);
+	}
+
+	/* argv[2]: doctype (nullable) — extract dom_node from JS object */
+	if (argc > 2 && !JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) {
+		node_private_t *dt_priv = JS_GetOpaqueAny(argv[2]);
+		if (dt_priv != NULL && dt_priv->node != NULL) {
+			doctype = (struct dom_document_type *)dt_priv->node;
+		}
+	}
+
+	exc = dom_implementation_create_document(
+		DOM_IMPLEMENTATION_HTML,
+		ns, qn,
+		doctype,
+		NULL, NULL,
+		&doc);
+
+	if (ns != NULL) JS_FreeCString(ctx, ns);
+	if (qn != NULL) JS_FreeCString(ctx, qn);
+
+	if (exc != DOM_NO_ERR || doc == NULL) return JS_UNDEFINED;
+
+	JSValue jsret = qjsw_push_node(ctx, (struct dom_node *)doc);
+	dom_node_unref(doc);
+	return jsret;
+%}
+
+method DOMImplementation::createHTMLDocument ()
+%{
+	size_t text_len;
+	const char *text = QJSB_TO_CSTRING(ctx, argv[0], &text_len);
+	if (text == NULL) return JS_UNDEFINED;
+	struct dom_document *doc = NULL, *ret = NULL;
+	struct dom_document_type *doctype = NULL;
+	struct dom_html_element *html = NULL, *head = NULL, *title = NULL, *body = NULL;
+	struct dom_node *spare_ref = NULL;
+	dom_string *text_str = NULL;
+	dom_exception exc;
+
+	exc = dom_string_create((const uint8_t*)text, text_len, &text_str);
+	JS_FreeCString(ctx, text);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_implementation_create_document(
+		DOM_IMPLEMENTATION_HTML,
+		NULL, NULL,
+		NULL,
+		NULL, NULL,
+		&doc
+		);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_implementation_create_document_type(
+		"html", NULL, NULL, &doctype);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_node_append_child(doc, doctype, &spare_ref);
+	if (exc != DOM_NO_ERR) goto out;
+	if (spare_ref != NULL) { dom_node_unref(spare_ref); spare_ref = NULL; }
+
+	exc = dom_document_create_element_ns(doc, corestring_dom_html_namespace,
+					     corestring_dom_HTML, &html);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_document_create_element_ns(doc, corestring_dom_html_namespace,
+					     corestring_dom_HEAD, &head);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_document_create_element_ns(doc, corestring_dom_html_namespace,
+					     corestring_dom_TITLE, &title);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_document_create_element_ns(doc, corestring_dom_html_namespace,
+					     corestring_dom_BODY, &body);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_node_set_text_content(title, text_str);
+	if (exc != DOM_NO_ERR) goto out;
+
+	exc = dom_node_append_child(head, title, &spare_ref);
+	if (exc != DOM_NO_ERR) goto out;
+	if (spare_ref != NULL) { dom_node_unref(spare_ref); spare_ref = NULL; }
+
+	exc = dom_node_append_child(html, head, &spare_ref);
+	if (exc != DOM_NO_ERR) goto out;
+	if (spare_ref != NULL) { dom_node_unref(spare_ref); spare_ref = NULL; }
+
+	exc = dom_node_append_child(html, body, &spare_ref);
+	if (exc != DOM_NO_ERR) goto out;
+	if (spare_ref != NULL) { dom_node_unref(spare_ref); spare_ref = NULL; }
+
+	exc = dom_node_append_child(doc, html, &spare_ref);
+	if (exc != DOM_NO_ERR) goto out;
+	if (spare_ref != NULL) { dom_node_unref(spare_ref); spare_ref = NULL; }
+
+	ret = doc;
+	doc = NULL;
+
+out:
+	if (text_str != NULL) {
+		dom_string_unref(text_str);
+	}
+	if (doc != NULL) {
+		dom_node_unref(doc);
+	}
+	if (html != NULL) {
+		dom_node_unref(html);
+	}
+	if (head != NULL) {
+		dom_node_unref(head);
+	}
+	if (title != NULL) {
+		dom_node_unref(title);
+	}
+	if (body != NULL) {
+		dom_node_unref(body);
+	}
+	if (doctype != NULL) {
+		dom_node_unref(doctype);
+	}
+	if (ret != NULL) {
+		JSValue jsret = qjsw_push_node(ctx, (struct dom_node *)ret);
+		dom_node_unref(ret);
+		return jsret;
+	}
+	return JS_UNDEFINED;
+%}

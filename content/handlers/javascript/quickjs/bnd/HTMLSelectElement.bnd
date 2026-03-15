@@ -1,0 +1,103 @@
+/* HTML select element binding using duktape and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init HTMLSelectElement(struct dom_html_element *html_select_element::html_element);
+
+getter HTMLSelectElement::disabled();
+setter HTMLSelectElement::disabled();
+
+getter HTMLSelectElement::multiple();
+setter HTMLSelectElement::multiple();
+
+getter HTMLSelectElement::name();
+setter HTMLSelectElement::name();
+
+getter HTMLSelectElement::type();
+
+getter HTMLSelectElement::value();
+setter HTMLSelectElement::value();
+
+getter HTMLSelectElement::selectedIndex()
+%{
+	int32_t idx = -1;
+	dom_html_select_element_get_selected_index(
+		(dom_html_select_element *)((node_private_t *)priv)->node, &idx);
+	return JS_NewInt32(ctx, idx);
+%}
+
+setter HTMLSelectElement::selectedIndex()
+%{
+	int32_t idx = 0;
+	JS_ToInt32(ctx, &idx, val);
+	dom_html_select_element_set_selected_index(
+		(dom_html_select_element *)((node_private_t *)priv)->node, idx);
+	return JS_UNDEFINED;
+%}
+
+getter HTMLSelectElement::length()
+%{
+	uint32_t len = 0;
+	dom_html_select_element_get_length(
+		(dom_html_select_element *)((node_private_t *)priv)->node, &len);
+	return QJSB_PUSH_UINT(ctx, len);
+%}
+
+getter HTMLSelectElement::options()
+%{
+	struct dom_html_options_collection *opts = NULL;
+	dom_exception exc = dom_html_select_element_get_options(
+		(dom_html_select_element *)((node_private_t *)priv)->node, &opts);
+	if (exc != DOM_NO_ERR || opts == NULL) return JS_UNDEFINED;
+	dom_html_collection *coll = (dom_html_collection *)opts;
+	JSValue coll_args[1];
+	coll_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)coll);
+	JSValue coll_obj = qjsw_create_object(ctx, "html_collection", 1, coll_args);
+	JS_FreeValue(ctx, coll_args[0]);
+	dom_html_collection_unref(coll);
+	if (JS_IsException(coll_obj)) return JS_UNDEFINED;
+	JSValue gen_fn = qjsw_push_generics(ctx, "makeListProxy");
+	if (!JS_IsFunction(ctx, gen_fn)) {
+		JS_FreeValue(ctx, gen_fn);
+		return coll_obj;
+	}
+	JSValue call_args[1] = { coll_obj };
+	JSValue result = qjsw_pcall(ctx, gen_fn, JS_UNDEFINED, 1, call_args, false);
+	JS_FreeValue(ctx, gen_fn);
+	JS_FreeValue(ctx, coll_obj);
+	if (JS_IsException(result)) return JS_UNDEFINED;
+	return result;
+%}
+
+method HTMLSelectElement::add()
+%{
+	if (argc < 1) return JS_UNDEFINED;
+	node_private_t *ele_priv = JS_GetOpaqueAny(argv[0]);
+	if (ele_priv == NULL || ele_priv->node == NULL) return JS_UNDEFINED;
+	dom_html_element *before = NULL;
+	if (argc > 1 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
+		node_private_t *bef_priv = JS_GetOpaqueAny(argv[1]);
+		if (bef_priv != NULL && bef_priv->node != NULL)
+			before = (dom_html_element *)bef_priv->node;
+	}
+	dom_html_select_element_add(
+		(dom_html_select_element *)((node_private_t *)priv)->node,
+		(dom_html_element *)ele_priv->node, before);
+	return JS_UNDEFINED;
+%}
+
+method HTMLSelectElement::remove()
+%{
+	int32_t index = 0;
+	if (argc > 0) JS_ToInt32(ctx, &index, argv[0]);
+	dom_html_select_element_remove(
+		(dom_html_select_element *)((node_private_t *)priv)->node, index);
+	return JS_UNDEFINED;
+%}
+

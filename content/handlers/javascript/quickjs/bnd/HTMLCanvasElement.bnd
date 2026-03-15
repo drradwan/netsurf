@@ -1,0 +1,47 @@
+/* HTML canvas element binding using QuickJS and libdom
+ *
+ * Copyright 2020 Vincent Sanders <vince@netsurf-browser.org>
+ * Copyright 2020 Daniel Silverstone <dsilvers@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init HTMLCanvasElement(struct dom_html_element *html_canvas_element::html_element);
+
+getter HTMLCanvasElement::width();
+setter HTMLCanvasElement::width();
+
+getter HTMLCanvasElement::height();
+setter HTMLCanvasElement::height();
+
+method HTMLCanvasElement::getContext()
+%{
+	/* modetype[, {options}] */
+	const char *modetype = JS_ToCString(ctx, argv[0]);
+	if (strcmp(modetype, "2d") != 0) {
+		JS_FreeCString(ctx, modetype);
+		return JS_NULL;
+	}
+	JS_FreeCString(ctx, modetype);
+
+	JSValue cached = JS_GetPropertyStr(ctx, this_val, "\xff" "Context2D");
+	if (JS_IsUndefined(cached)) {
+		JS_FreeValue(ctx, cached);
+
+		JSValue node_arg = JS_NewInt64(ctx, (int64_t)(uintptr_t)((node_private_t*)priv)->node);
+		JSValue result = qjsw_create_object(ctx, "canvasrenderingcontext2d",
+					1, &node_arg);
+		JS_FreeValue(ctx, node_arg);
+		if (JS_IsException(result)) {
+			return JS_ThrowTypeError(ctx,
+				  "Unable to create CanvasRenderingContext2D");
+		}
+		JS_SetPropertyStr(ctx, this_val, "\xff" "Context2D",
+				  JS_DupValue(ctx, result));
+		return result;
+	}
+	return cached;
+%}

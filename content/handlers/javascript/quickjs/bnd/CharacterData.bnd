@@ -1,0 +1,65 @@
+/* CharacterData binding for browser using QuickJS and libdom
+ *
+ * Copyright 2026 Senfoni Authors
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init CharacterData(struct dom_node_character_data *character_data::node);
+
+getter CharacterData::data()
+%{
+	if (priv->parent.node == NULL) return JS_UNDEFINED;
+	dom_exception exc;
+	dom_string *str = NULL;
+	exc = dom_characterdata_get_data((dom_characterdata *)priv->parent.node, &str);
+	if (exc != DOM_NO_ERR || str == NULL) return JS_UNDEFINED;
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(str), dom_string_length(str));
+	dom_string_unref(str);
+	return jsret;
+%}
+
+setter CharacterData::data()
+%{
+	if (priv->parent.node == NULL) return JS_UNDEFINED;
+	dom_exception exc;
+	dom_string *content;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, val, &slen);
+	if (s == NULL) return JS_UNDEFINED;
+	exc = dom_string_create((const uint8_t *)s, slen, &content);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	exc = dom_characterdata_set_data((dom_characterdata *)priv->parent.node, content);
+	dom_string_unref(content);
+	return JS_UNDEFINED;
+%}
+
+getter CharacterData::length()
+%{
+	if (priv->parent.node == NULL) return JS_UNDEFINED;
+	dom_exception exc;
+	uint32_t len = 0;
+	exc = dom_characterdata_get_length((dom_characterdata *)priv->parent.node, &len);
+	if (exc != DOM_NO_ERR) return QJSB_PUSH_UINT(ctx, 0);
+	return QJSB_PUSH_UINT(ctx, len);
+%}
+
+method CharacterData::substringData()
+%{
+	if (priv->parent.node == NULL) return JS_UNDEFINED;
+	dom_exception exc;
+	uint32_t offset, count;
+	dom_string *result = NULL;
+	if (JS_ToUint32(ctx, &offset, argv[0])) return JS_UNDEFINED;
+	if (JS_ToUint32(ctx, &count, argv[1])) return JS_UNDEFINED;
+	exc = dom_characterdata_substring_data((dom_characterdata *)priv->parent.node,
+		offset, count, &result);
+	if (exc != DOM_NO_ERR || result == NULL) return JS_UNDEFINED;
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(result), dom_string_length(result));
+	dom_string_unref(result);
+	return jsret;
+%}

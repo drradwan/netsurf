@@ -1,0 +1,503 @@
+/* Node binding for browser using QuickJS and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ * Copyright 2026 Senfoni Authors
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+class Node {
+	private dom_node *node;
+	prologue %{
+
+%};
+};
+
+init Node(struct dom_node *node)
+%{
+	priv->node = node;
+	dom_node_ref(node);
+	priv->parent.is_node = true;
+%}
+
+fini Node()
+%{
+	dom_node_unref(priv->node);
+%}
+
+getter Node::nodeType()
+%{
+	dom_exception exc;
+	dom_node_type ntype;
+	exc = dom_node_get_node_type(priv->node, &ntype);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	return QJSB_PUSH_UINT(ctx, (uint32_t)ntype);
+%}
+
+getter Node::nodeName()
+%{
+	/* Non-HTML namespace elements: use original qname from createElementNS */
+	JSValue qname = JS_GetPropertyStr(ctx, this_val, "__NSQJS_qname__");
+	if (!JS_IsUndefined(qname)) {
+		return qname;
+	}
+	JS_FreeValue(ctx, qname);
+
+	dom_exception exc;
+	dom_string *str = NULL;
+	exc = dom_node_get_node_name(priv->node, &str);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(str), dom_string_length(str));
+	dom_string_unref(str);
+	return jsret;
+%}
+
+getter Node::baseURI()
+%{
+	dom_exception exc;
+	dom_string *base = NULL;
+	exc = dom_node_get_base(priv->node, &base);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	assert(base != NULL);
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(base), dom_string_length(base));
+	dom_string_unref(base);
+	return jsret;
+%}
+
+getter Node::ownerDocument()
+%{
+	dom_exception exc;
+	dom_node *doc;
+	exc = dom_node_get_owner_document(priv->node, &doc);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	if (doc == NULL) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, doc);
+	dom_node_unref(doc);
+	return jsret;
+%}
+
+getter Node::parentNode()
+%{
+	dom_exception exc;
+	dom_node *pnode = NULL;
+	exc = dom_node_get_parent_node(priv->node, &pnode);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, pnode);
+	dom_node_unref(pnode);
+	return jsret;
+%}
+
+getter Node::parentElement()
+%{
+	dom_exception exc;
+	dom_node *pnode = NULL;
+	dom_node_type ntype = DOM_NODE_TYPE_COUNT + 1;
+	exc = dom_node_get_parent_node(priv->node, &pnode);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	if (pnode != NULL) {
+		exc = dom_node_get_node_type(pnode, &ntype);
+		if (exc != DOM_NO_ERR) { dom_node_unref(pnode); return JS_UNDEFINED; }
+	}
+	JSValue jsret = qjsw_push_node(ctx, (ntype == DOM_ELEMENT_NODE) ? pnode : NULL);
+	dom_node_unref(pnode);
+	return jsret;
+%}
+
+method Node::hasChildNodes()
+%{
+	dom_exception exc;
+	bool res;
+	exc = dom_node_has_child_nodes(priv->node, &res);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	return QJSB_PUSH_BOOL(ctx, res);
+%}
+
+getter Node::childNodes()
+%{
+	dom_exception exc;
+	dom_nodelist *nlist = NULL;
+
+	JSValue cached = JS_GetPropertyStr(ctx, this_val, "__NSQJS_childNodes__");
+	if (!JS_IsUndefined(cached)) {
+		return cached;
+	}
+	JS_FreeValue(ctx, cached);
+
+	exc = dom_node_get_child_nodes(priv->node, &nlist);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	JSValue nlist_args[1];
+	nlist_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)nlist);
+	JSValue nlist_obj = qjsw_create_object(ctx, "node_list", 1, nlist_args);
+	JS_FreeValue(ctx, nlist_args[0]);
+	dom_nodelist_unref(nlist);
+	if (JS_IsException(nlist_obj)) {
+		return JS_UNDEFINED;
+	}
+
+	JSValue gen_fn = qjsw_push_generics(ctx, "makeListProxy");
+	if (!JS_IsFunction(ctx, gen_fn)) {
+		JS_FreeValue(ctx, gen_fn);
+		JS_SetPropertyStr(ctx, this_val, "__NSQJS_childNodes__", JS_DupValue(ctx, nlist_obj));
+		return nlist_obj;
+	}
+
+	JSValue call_args[1] = { nlist_obj };
+	JSValue result = qjsw_pcall(ctx, gen_fn, JS_UNDEFINED, 1, call_args, false);
+	JS_FreeValue(ctx, gen_fn);
+	JS_FreeValue(ctx, nlist_obj);
+	if (JS_IsException(result)) {
+		NSLOG(quickjs, DEBUG, "Unable to construct nodelist?");
+		return JS_UNDEFINED;
+	}
+
+	JS_SetPropertyStr(ctx, this_val, "__NSQJS_childNodes__", JS_DupValue(ctx, result));
+	return result;
+%}
+
+getter Node::firstChild()
+%{
+	dom_exception exc;
+	dom_node *n;
+	exc = dom_node_get_first_child(priv->node, &n);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, n);
+	dom_node_unref(n);
+	if (JS_IsUndefined(jsret)) return JS_UNDEFINED;
+	return jsret;
+%}
+
+getter Node::lastChild()
+%{
+	dom_exception exc;
+	dom_node *n;
+	exc = dom_node_get_last_child(priv->node, &n);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, n);
+	dom_node_unref(n);
+	if (JS_IsUndefined(jsret)) return JS_UNDEFINED;
+	return jsret;
+%}
+
+getter Node::previousSibling()
+%{
+	dom_exception exc;
+	dom_node *n;
+	exc = dom_node_get_previous_sibling(priv->node, &n);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, n);
+	dom_node_unref(n);
+	if (JS_IsUndefined(jsret)) return JS_UNDEFINED;
+	return jsret;
+%}
+
+getter Node::nextSibling()
+%{
+	dom_exception exc;
+	dom_node *n;
+	exc = dom_node_get_next_sibling(priv->node, &n);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, n);
+	dom_node_unref(n);
+	if (JS_IsUndefined(jsret)) return JS_UNDEFINED;
+	return jsret;
+%}
+
+getter Node::nodeValue()
+%{
+	dom_exception exc;
+	dom_string *content;
+
+	exc = dom_node_get_node_value(priv->node, &content);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	if (content != NULL) {
+		JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(content), dom_string_length(content));
+		dom_string_unref(content);
+		return jsret;
+	}
+	return JS_UNDEFINED;
+%}
+
+setter Node::nodeValue()
+%{
+	dom_exception exc;
+	dom_string *content;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, val, &slen);
+	if (s == NULL) return JS_UNDEFINED;
+	exc = dom_string_create((const uint8_t *)s, slen, &content);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	exc = dom_node_set_node_value(priv->node, content);
+	dom_string_unref(content);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	return JS_UNDEFINED;
+%}
+
+getter Node::textContent()
+%{
+	dom_exception exc;
+	dom_string *content;
+
+	exc = dom_node_get_text_content(priv->node, &content);
+	if (exc != DOM_NO_ERR) {
+		return JS_UNDEFINED;
+	}
+
+	if (content != NULL) {
+		JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(content), dom_string_length(content));
+		dom_string_unref(content);
+		return jsret;
+	}
+	return JS_UNDEFINED;
+%}
+
+setter Node::textContent()
+%{
+	dom_exception exc;
+	dom_string *content;
+	size_t slen;
+	const char *s = QJSB_TO_CSTRING(ctx, val, &slen);
+	if (s == NULL) return JS_UNDEFINED;
+	exc = dom_string_create((const uint8_t *)s, slen, &content);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	exc = dom_node_set_text_content(priv->node, content);
+	dom_string_unref(content);
+	return JS_UNDEFINED;
+%}
+
+method Node::normalize()
+%{
+	dom_exception exc;
+	exc = dom_node_normalize(priv->node);
+	return JS_UNDEFINED;
+%}
+
+method Node::cloneNode()
+%{
+	dom_exception exc;
+	bool deep;
+	dom_node *clone;
+
+	deep = JS_ToBool(ctx, argv[0]);
+
+	exc = dom_node_clone_node(priv->node, deep, &clone);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, clone);
+	dom_node_unref(clone);
+	return jsret;
+%}
+
+method Node::isEqualNode()
+%{
+	dom_exception exc;
+	bool result;
+
+	if (!qjsw_instanceof(ctx, argv[0], "node")) return JS_UNDEFINED;
+
+	node_private_t *other = JS_GetOpaqueAny(argv[0]);
+	if (other == NULL) return JS_UNDEFINED;
+
+	exc = dom_node_is_equal(priv->node, other->node, &result);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	return QJSB_PUSH_BOOL(ctx, result);
+%}
+
+method Node::compareDocumentPosition()
+%{
+	dom_exception exc;
+	uint16_t ret;
+
+	if (!qjsw_instanceof(ctx, argv[0], "node")) return JS_UNDEFINED;
+
+	node_private_t *other = JS_GetOpaqueAny(argv[0]);
+	if (other == NULL) return JS_UNDEFINED;
+
+	exc = dom_node_compare_document_position(priv->node, other->node,
+			&ret);
+
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_UINT(ctx, ret);
+%}
+
+method Node::contains()
+%{
+	dom_exception exc;
+	uint16_t ret;
+
+	if (!qjsw_instanceof(ctx, argv[0], "node")) return JS_UNDEFINED;
+
+	node_private_t *other = JS_GetOpaqueAny(argv[0]);
+	if (other == NULL) return JS_UNDEFINED;
+
+	if (priv->node == other->node) {
+		return QJSB_PUSH_BOOL(ctx, true);
+	}
+
+	exc = dom_node_compare_document_position(priv->node, other->node,
+			&ret);
+
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_BOOL(ctx, ret == DOM_DOCUMENT_POSITION_CONTAINED_BY);
+%}
+
+method Node::lookupPrefix()
+%{
+	dom_exception exc;
+	dom_string *ns, *pfx;
+	size_t size;
+	const char *s = QJSB_TO_CSTRING(ctx, argv[0], &size);
+	if (s == NULL) return JS_UNDEFINED;
+	exc = dom_string_create((const uint8_t *)s, size, &ns);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	exc = dom_node_lookup_prefix(priv->node, ns, &pfx);
+	dom_string_unref(ns);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	if (pfx == NULL) return JS_UNDEFINED;
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(pfx), dom_string_length(pfx));
+	dom_string_unref(pfx);
+	return jsret;
+%}
+
+method Node::lookupNamespaceURI()
+%{
+	dom_exception exc;
+	dom_string *ns, *pfx;
+	size_t size;
+	const char *s = QJSB_TO_CSTRING(ctx, argv[0], &size);
+	if (s == NULL) return JS_UNDEFINED;
+	exc = dom_string_create((const uint8_t *)s, size, &pfx);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	exc = dom_node_lookup_namespace(priv->node, pfx, &ns);
+	dom_string_unref(pfx);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	if (ns == NULL) return JS_UNDEFINED;
+	JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(ns), dom_string_length(ns));
+	dom_string_unref(ns);
+	return jsret;
+%}
+
+
+method Node::isDefaultNamespace()
+%{
+	dom_exception exc;
+	dom_string *ns;
+	size_t size;
+	const char *s = QJSB_TO_CSTRING(ctx, argv[0], &size);
+	if (s == NULL) return JS_UNDEFINED;
+	bool ret;
+	exc = dom_string_create((const uint8_t *)s, size, &ns);
+	JS_FreeCString(ctx, s);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	exc = dom_node_is_default_namespace(priv->node, ns, &ret);
+	dom_string_unref(ns);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	return QJSB_PUSH_BOOL(ctx, ret);
+%}
+
+method Node::insertBefore()
+%{
+	if (!qjsw_instanceof(ctx, argv[0], "node")) return JS_UNDEFINED;
+
+	node_private_t *other = JS_GetOpaqueAny(argv[0]);
+	if (other == NULL) return JS_UNDEFINED;
+
+	dom_node *before = NULL;
+
+	if (argc == 2) {
+		if (!qjsw_instanceof(ctx, argv[1], "node")) return JS_UNDEFINED;
+		node_private_t *another = JS_GetOpaqueAny(argv[1]);
+		if (another != NULL) before = another->node;
+	}
+
+	dom_exception err;
+	dom_node *spare;
+
+	err = dom_node_insert_before(priv->node, other->node, before, &spare);
+	if (err != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, spare);
+	dom_node_unref(spare);
+
+	return jsret;
+%}
+
+method Node::appendChild()
+%{
+	if (!qjsw_instanceof(ctx, argv[0], "node")) return JS_UNDEFINED;
+
+	node_private_t *other = JS_GetOpaqueAny(argv[0]);
+	if (other == NULL) return JS_UNDEFINED;
+
+	dom_exception err;
+	dom_node *spare;
+
+	err = dom_node_append_child(priv->node, other->node, &spare);
+	if (err != DOM_NO_ERR) {
+		if (err == DOM_HIERARCHY_REQUEST_ERR)
+			return qjsw_throw_dom_exception(ctx, 3,
+				"HierarchyRequestError");
+		if (err == DOM_WRONG_DOCUMENT_ERR)
+			return qjsw_throw_dom_exception(ctx, 4,
+				"WrongDocumentError");
+		if (err == DOM_NOT_FOUND_ERR)
+			return qjsw_throw_dom_exception(ctx, 8,
+				"NotFoundError");
+		return JS_UNDEFINED;
+	}
+	JSValue jsret = qjsw_push_node(ctx, spare);
+	dom_node_unref(spare);
+
+	return jsret;
+%}
+
+method Node::replaceChild()
+%{
+	if (!qjsw_instanceof(ctx, argv[0], "node")) return JS_UNDEFINED;
+
+	node_private_t *other = JS_GetOpaqueAny(argv[0]);
+	if (other == NULL) return JS_UNDEFINED;
+
+	if (!qjsw_instanceof(ctx, argv[1], "node")) return JS_UNDEFINED;
+
+	node_private_t *old = JS_GetOpaqueAny(argv[1]);
+	if (old == NULL) return JS_UNDEFINED;
+
+	dom_exception err;
+	dom_node *spare;
+
+	err = dom_node_replace_child(priv->node, other->node, old->node, &spare);
+	if (err != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, spare);
+	dom_node_unref(spare);
+
+	return jsret;
+%}
+
+method Node::removeChild()
+%{
+	if (!qjsw_instanceof(ctx, argv[0], "node")) return JS_UNDEFINED;
+
+	node_private_t *other = JS_GetOpaqueAny(argv[0]);
+	if (other == NULL) return JS_UNDEFINED;
+
+	dom_exception err;
+	dom_node *spare;
+
+	err = dom_node_remove_child(priv->node, other->node, &spare);
+	if (err != DOM_NO_ERR) return JS_UNDEFINED;
+	JSValue jsret = qjsw_push_node(ctx, spare);
+	dom_node_unref(spare);
+
+	return jsret;
+%}

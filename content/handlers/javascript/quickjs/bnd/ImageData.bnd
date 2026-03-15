@@ -1,0 +1,47 @@
+/* HTML canvas ImageData objects
+ *
+ * Copyright 2020 Daniel Silverstone <dsilvers@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+class ImageData {
+      private int width;
+      private int height;
+      private uint8_t *data;
+};
+
+init ImageData(int width, int height)
+%{
+	priv->width = width;
+	priv->height = height;
+	size_t byte_len = (size_t)width * height * 4;
+	priv->data = js_malloc(ctx, byte_len);
+	if (priv->data != NULL) {
+		memset(priv->data, 0, byte_len);
+	}
+%}
+
+fini ImageData()
+%{
+	js_free(ctx, priv->data);
+%}
+
+getter ImageData::width()
+%{
+	return QJSB_PUSH_INT(ctx, priv->width);
+%}
+
+getter ImageData::height()
+%{
+	return QJSB_PUSH_INT(ctx, priv->height);
+%}
+
+getter ImageData::data()
+%{
+	size_t byte_len = (size_t)priv->width * priv->height * 4;
+	return JS_NewArrayBufferCopy(ctx, priv->data, byte_len);
+%}

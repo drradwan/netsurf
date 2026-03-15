@@ -1,0 +1,50 @@
+/* UIEvent binding for browser using QuickJS and libdom
+ *
+ * Copyright 2026 Senfoni Authors
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init UIEvent(struct dom_ui_event *evt::evt);
+
+getter UIEvent::detail()
+%{
+	int32_t detail = 0;
+	dom_ui_event_get_detail((dom_ui_event *)priv->parent.evt, &detail);
+	return JS_NewInt32(ctx, detail);
+%}
+
+getter UIEvent::view()
+%{
+	/* Return the global window object — libdom's abstract_view is unused */
+	JSValue global = JS_GetGlobalObject(ctx);
+	return global;
+%}
+
+method UIEvent::initUIEvent()
+%{
+	dom_exception exc;
+	size_t text_len;
+	const char *text = QJSB_TO_CSTRING(ctx, argv[0], &text_len);
+	if (text == NULL) return JS_UNDEFINED;
+	dom_string *text_str;
+
+	exc = dom_string_create((const uint8_t*)text, text_len, &text_str);
+	JS_FreeCString(ctx, text);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	bool bubbles = JS_ToBool(ctx, argv[1]);
+	bool cancelable = JS_ToBool(ctx, argv[2]);
+	/* argv[3] = view (ignored — libdom uses dom_abstract_view) */
+	int32_t detail = 0;
+	if (argc > 4) JS_ToInt32(ctx, &detail, argv[4]);
+
+	exc = dom_ui_event_init((dom_ui_event *)priv->parent.evt,
+				text_str, bubbles, cancelable, NULL, detail);
+	dom_string_unref(text_str);
+
+	return JS_UNDEFINED;
+%}

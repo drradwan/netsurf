@@ -1,0 +1,45 @@
+/* DOMSettableTokenList binding for browser using QuickJS and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+class DOMSettableTokenList {
+};
+
+init DOMSettableTokenList(struct dom_tokenlist *tokens::tokens);
+
+getter DOMSettableTokenList::value()
+%{
+	dom_exception exc;
+	dom_string *value;
+
+	exc = dom_tokenlist_get_value(priv->parent.tokens, &value);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	JSValue ret = QJSB_PUSH_STRING(ctx, dom_string_data(value), dom_string_length(value));
+	dom_string_unref(value);
+
+	return ret;
+%}
+
+setter DOMSettableTokenList::value()
+%{
+	dom_exception exc;
+	dom_string *value;
+    size_t slen;
+    const char *s = QJSB_TO_CSTRING(ctx, val, &slen);
+
+    exc = dom_string_create_interned((const uint8_t *)s, slen, &value);
+    JS_FreeCString(ctx, s);
+    if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+    exc = dom_tokenlist_set_value(priv->parent.tokens, value);
+    dom_string_unref(value);
+
+    return JS_UNDEFINED;
+%}

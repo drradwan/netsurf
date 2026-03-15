@@ -1,0 +1,54 @@
+/* NodeList binding for browser using QuickJS and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+class NodeList {
+	private struct dom_nodelist *nodes;
+};
+
+init NodeList(struct dom_nodelist *nodes)
+%{
+	priv->nodes = nodes;
+	if (nodes != NULL)
+		dom_nodelist_ref(nodes);
+%}
+
+fini NodeList()
+%{
+	dom_nodelist_unref(priv->nodes);
+%}
+
+getter NodeList::length()
+%{
+	dom_exception err;
+	uint32_t len;
+
+	err = dom_nodelist_get_length(priv->nodes, &len);
+
+	if (err != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_UINT(ctx, (uint32_t)len);
+%}
+
+method NodeList::item()
+%{
+	uint32_t i;
+	JS_ToUint32(ctx, &i, argv[0]);
+	dom_exception err;
+	dom_node *node;
+
+	err = dom_nodelist_item(priv->nodes, i, &node);
+
+	if (err != DOM_NO_ERR || node == NULL) return JS_NULL;
+
+	JSValue ret = qjsw_push_node(ctx, node);
+	dom_node_unref(node);
+
+	return ret;
+%}

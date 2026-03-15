@@ -6,7 +6,10 @@
 
 S_JAVASCRIPT_BINDING:=
 
-ifeq ($(NETSURF_USE_DUKTAPE),YES)
+ifeq ($(NETSURF_USE_QUICKJS),YES)
+# QuickJS (Phase 2+) — replaces Duktape when NETSURF_USE_QUICKJS=YES
+include content/handlers/javascript/quickjs/Makefile
+else ifeq ($(NETSURF_USE_DUKTAPE),YES)
 # Duktape
 include content/handlers/javascript/duktape/Makefile
 else

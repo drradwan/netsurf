@@ -1,0 +1,182 @@
+/* Event binding for browser using QuickJS and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ * Copyright 2015 Daniel Silverstone <dsilvers@netsurf-browser.org>
+ * Copyright 2026 Senfoni Authors
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+class Event {
+      private dom_event *evt;
+};
+
+init Event (struct dom_event *evt)
+%{
+	priv->evt = evt;
+	dom_event_ref(evt);
+%}
+
+fini Event ()
+%{
+	dom_event_unref(priv->evt);
+%}
+
+getter Event::type ()
+%{
+	dom_string *ret;
+	dom_exception exc;
+
+	exc = dom_event_get_type(priv->evt, &ret);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+	if (ret == NULL) {
+		return QJSB_PUSH_STRING(ctx, "", 0);
+	} else {
+		JSValue jsret = QJSB_PUSH_STRING(ctx, dom_string_data(ret),
+				dom_string_length(ret));
+		dom_string_unref(ret);
+		return jsret;
+	}
+%}
+
+getter Event::target ()
+%{
+	dom_node *et;
+	dom_exception exc;
+
+	exc = dom_event_get_target(priv->evt, &et);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	JSValue jsret = qjsw_push_node(ctx, et);
+
+	dom_node_unref(et);
+	return jsret;
+%}
+
+getter Event::currentTarget ()
+%{
+	dom_node *et;
+	dom_exception exc;
+
+	exc = dom_event_get_current_target(priv->evt, &et);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	JSValue jsret = qjsw_push_node(ctx, et);
+
+	dom_node_unref(et);
+	return jsret;
+%}
+
+getter Event::eventPhase ()
+%{
+	dom_exception exc;
+	dom_event_flow_phase phase;
+
+	exc = dom_event_get_event_phase(priv->evt, &phase);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_UINT(ctx, phase);
+%}
+
+method Event::stopPropagation ()
+%{
+	dom_exception exc;
+
+	exc = dom_event_stop_propagation(priv->evt);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return JS_UNDEFINED;
+%}
+
+method Event::stopImmediatePropagation ()
+%{
+	dom_exception exc;
+
+	exc = dom_event_stop_immediate_propagation(priv->evt);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return JS_UNDEFINED;
+%}
+
+getter Event::bubbles ()
+%{
+	dom_exception exc;
+	bool ret;
+
+	exc = dom_event_get_bubbles(priv->evt, &ret);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_BOOL(ctx, ret);
+%}
+
+getter Event::cancelable ()
+%{
+	dom_exception exc;
+	bool ret;
+
+	exc = dom_event_get_cancelable(priv->evt, &ret);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_BOOL(ctx, ret);
+%}
+
+method Event::preventDefault ()
+%{
+	dom_exception exc;
+
+	exc = dom_event_prevent_default(priv->evt);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return JS_UNDEFINED;
+%}
+
+getter Event::defaultPrevented ()
+%{
+	dom_exception exc;
+	bool ret;
+
+	exc = dom_event_is_default_prevented(priv->evt, &ret);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_BOOL(ctx, ret);
+%}
+
+getter Event::isTrusted ()
+%{
+	dom_exception exc;
+	bool ret;
+
+	exc = dom_event_get_is_trusted(priv->evt, &ret);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	return QJSB_PUSH_BOOL(ctx, ret);
+%}
+
+
+method Event::initEvent ()
+%{
+	dom_exception exc;
+	bool bubbles;
+	bool cancellable;
+
+	size_t text_len;
+	const char *text = QJSB_TO_CSTRING(ctx, argv[0], &text_len);
+	if (text == NULL) return JS_UNDEFINED;
+	dom_string *text_str;
+
+	exc = dom_string_create((const uint8_t*)text, text_len, &text_str);
+	JS_FreeCString(ctx, text);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	bubbles = JS_ToBool(ctx, argv[1]);
+	cancellable = JS_ToBool(ctx, argv[2]);
+
+	exc = dom_event_init(priv->evt, text_str, bubbles, cancellable);
+	dom_string_unref(text_str);
+
+	return JS_UNDEFINED;
+%}
+

@@ -1,0 +1,55 @@
+/* MouseEvent binding for browser using QuickJS and libdom
+ *
+ * Copyright 2026 Senfoni Authors
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init MouseEvent(struct dom_mouse_event *evt::evt);
+
+method MouseEvent::initMouseEvent()
+%{
+	dom_exception exc;
+	size_t text_len;
+	const char *text = QJSB_TO_CSTRING(ctx, argv[0], &text_len);
+	if (text == NULL) return JS_UNDEFINED;
+	dom_string *text_str;
+
+	exc = dom_string_create((const uint8_t*)text, text_len, &text_str);
+	JS_FreeCString(ctx, text);
+	if (exc != DOM_NO_ERR) return JS_UNDEFINED;
+
+	bool bubbles = JS_ToBool(ctx, argv[1]);
+	bool cancelable = JS_ToBool(ctx, argv[2]);
+	/* argv[3] = view */
+	int32_t detail = 0, sx = 0, sy = 0, cx = 0, cy = 0;
+	bool ctrl = false, alt = false, shift = false, meta = false;
+	unsigned short button = 0;
+
+	if (argc > 4) JS_ToInt32(ctx, &detail, argv[4]);
+	if (argc > 5) JS_ToInt32(ctx, &sx, argv[5]);
+	if (argc > 6) JS_ToInt32(ctx, &sy, argv[6]);
+	if (argc > 7) JS_ToInt32(ctx, &cx, argv[7]);
+	if (argc > 8) JS_ToInt32(ctx, &cy, argv[8]);
+	if (argc > 9) ctrl = JS_ToBool(ctx, argv[9]);
+	if (argc > 10) alt = JS_ToBool(ctx, argv[10]);
+	if (argc > 11) shift = JS_ToBool(ctx, argv[11]);
+	if (argc > 12) meta = JS_ToBool(ctx, argv[12]);
+	if (argc > 13) {
+		int32_t b;
+		JS_ToInt32(ctx, &b, argv[13]);
+		button = (unsigned short)b;
+	}
+	/* argv[14] = relatedTarget (ignored for now) */
+
+	exc = dom_mouse_event_init((dom_mouse_event *)priv->parent.parent.evt,
+				   text_str, bubbles, cancelable, NULL, detail,
+				   sx, sy, cx, cy, ctrl, alt, shift, meta,
+				   button, NULL);
+	dom_string_unref(text_str);
+
+	return JS_UNDEFINED;
+%}

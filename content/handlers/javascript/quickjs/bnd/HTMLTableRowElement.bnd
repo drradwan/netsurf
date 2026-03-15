@@ -1,0 +1,77 @@
+/* HTML table row element binding using duktape and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init HTMLTableRowElement(struct dom_html_element *html_table_row_element::html_element);
+
+getter HTMLTableRowElement::align();
+setter HTMLTableRowElement::align();
+
+getter HTMLTableRowElement::bgColor();
+setter HTMLTableRowElement::bgColor();
+
+getter HTMLTableRowElement::chOff();
+setter HTMLTableRowElement::chOff();
+
+getter HTMLTableRowElement::ch();
+setter HTMLTableRowElement::ch();
+
+getter HTMLTableRowElement::vAlign();
+setter HTMLTableRowElement::vAlign();
+
+getter HTMLTableRowElement::rowIndex();
+
+getter HTMLTableRowElement::sectionRowIndex();
+
+getter HTMLTableRowElement::cells()
+%{
+	dom_html_collection *coll = NULL;
+	dom_exception exc = dom_html_table_row_element_get_cells(
+		(dom_html_table_row_element *)((node_private_t *)priv)->node, &coll);
+	if (exc != DOM_NO_ERR || coll == NULL) return JS_UNDEFINED;
+	JSValue coll_args[1];
+	coll_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)coll);
+	JSValue coll_obj = qjsw_create_object(ctx, "html_collection", 1, coll_args);
+	JS_FreeValue(ctx, coll_args[0]);
+	dom_html_collection_unref(coll);
+	if (JS_IsException(coll_obj)) return JS_UNDEFINED;
+	JSValue gen_fn = qjsw_push_generics(ctx, "makeListProxy");
+	if (!JS_IsFunction(ctx, gen_fn)) {
+		JS_FreeValue(ctx, gen_fn);
+		return coll_obj;
+	}
+	JSValue call_args[1] = { coll_obj };
+	JSValue result = qjsw_pcall(ctx, gen_fn, JS_UNDEFINED, 1, call_args, false);
+	JS_FreeValue(ctx, gen_fn);
+	JS_FreeValue(ctx, coll_obj);
+	if (JS_IsException(result)) return JS_UNDEFINED;
+	return result;
+%}
+
+method HTMLTableRowElement::insertCell()
+%{
+	int32_t index = -1;
+	if (argc > 0) JS_ToInt32(ctx, &index, argv[0]);
+	dom_html_element *cell = NULL;
+	dom_exception exc = dom_html_table_row_element_insert_cell(
+		(dom_html_table_row_element *)((node_private_t *)priv)->node, index, &cell);
+	if (exc != DOM_NO_ERR || cell == NULL) return JS_NULL;
+	JSValue ret = qjsw_push_node(ctx, (dom_node *)cell);
+	dom_node_unref(cell);
+	return ret;
+%}
+
+method HTMLTableRowElement::deleteCell()
+%{
+	int32_t index = 0;
+	if (argc > 0) JS_ToInt32(ctx, &index, argv[0]);
+	dom_html_table_row_element_delete_cell(
+		(dom_html_table_row_element *)((node_private_t *)priv)->node, index);
+	return JS_UNDEFINED;
+%}

@@ -1,0 +1,70 @@
+/* HTML table section element binding using duktape and libdom
+ *
+ * Copyright 2015 Vincent Sanders <vince@netsurf-browser.org>
+ *
+ * This file is part of NetSurf, http://www.netsurf-browser.org/
+ *
+ * Released under the terms of the MIT License,
+ *         http://www.opensource.org/licenses/mit-license
+ */
+
+init HTMLTableSectionElement(struct dom_html_element *html_table_section_element::html_element);
+
+getter HTMLTableSectionElement::align();
+setter HTMLTableSectionElement::align();
+
+getter HTMLTableSectionElement::chOff();
+setter HTMLTableSectionElement::chOff();
+
+getter HTMLTableSectionElement::ch();
+setter HTMLTableSectionElement::ch();
+
+getter HTMLTableSectionElement::vAlign();
+setter HTMLTableSectionElement::vAlign();
+
+getter HTMLTableSectionElement::rows()
+%{
+	dom_html_collection *coll = NULL;
+	dom_exception exc = dom_html_table_section_element_get_rows(
+		(dom_html_table_section_element *)((node_private_t *)priv)->node, &coll);
+	if (exc != DOM_NO_ERR || coll == NULL) return JS_UNDEFINED;
+	JSValue coll_args[1];
+	coll_args[0] = JS_NewInt64(ctx, (int64_t)(uintptr_t)coll);
+	JSValue coll_obj = qjsw_create_object(ctx, "html_collection", 1, coll_args);
+	JS_FreeValue(ctx, coll_args[0]);
+	dom_html_collection_unref(coll);
+	if (JS_IsException(coll_obj)) return JS_UNDEFINED;
+	JSValue gen_fn = qjsw_push_generics(ctx, "makeListProxy");
+	if (!JS_IsFunction(ctx, gen_fn)) {
+		JS_FreeValue(ctx, gen_fn);
+		return coll_obj;
+	}
+	JSValue call_args[1] = { coll_obj };
+	JSValue result = qjsw_pcall(ctx, gen_fn, JS_UNDEFINED, 1, call_args, false);
+	JS_FreeValue(ctx, gen_fn);
+	JS_FreeValue(ctx, coll_obj);
+	if (JS_IsException(result)) return JS_UNDEFINED;
+	return result;
+%}
+
+method HTMLTableSectionElement::insertRow()
+%{
+	int32_t index = -1;
+	if (argc > 0) JS_ToInt32(ctx, &index, argv[0]);
+	dom_html_element *row = NULL;
+	dom_exception exc = dom_html_table_section_element_insert_row(
+		(dom_html_table_section_element *)((node_private_t *)priv)->node, index, &row);
+	if (exc != DOM_NO_ERR || row == NULL) return JS_NULL;
+	JSValue ret = qjsw_push_node(ctx, (dom_node *)row);
+	dom_node_unref(row);
+	return ret;
+%}
+
+method HTMLTableSectionElement::deleteRow()
+%{
+	int32_t index = 0;
+	if (argc > 0) JS_ToInt32(ctx, &index, argv[0]);
+	dom_html_table_section_element_delete_row(
+		(dom_html_table_section_element *)((node_private_t *)priv)->node, index);
+	return JS_UNDEFINED;
+%}
