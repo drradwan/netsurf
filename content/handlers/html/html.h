@@ -180,6 +180,15 @@ struct content_html_frames *html_get_frameset(struct hlcache_handle *h);
 struct content_html_iframe *html_get_iframe(struct hlcache_handle *h);
 
 /**
+ * Fire a load event on an iframe DOM node in the parent content's JS context.
+ *
+ * \param parent_content  The parent html content handle
+ * \param iframe_node     The iframe DOM element to fire load on
+ */
+void html_fire_iframe_onload(struct hlcache_handle *parent_content,
+		struct dom_node *iframe_node);
+
+/**
  * obtain html base target from handle
  *
  * used by core browser

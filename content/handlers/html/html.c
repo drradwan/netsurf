@@ -290,11 +290,6 @@ html_proceed_to_done(html_content *html)
 	case CONTENT_STATUS_READY:
 		if (html->base.active == 0) {
 			content_set_done(&html->base);
-			/* Process any dynamic iframes that were created
-			 * by JS during the loading phase. Now that we're
-			 * DONE, html_js_reflow will rebuild the box tree
-			 * and create browser_windows for new iframes. */
-			html_js_reflow(html);
 			return NSERROR_OK;
 		}
 		break;
@@ -361,59 +356,18 @@ html_js_reflow(html_content *htmlc)
 		return error;
 	}
 
-	NSLOG(jserrors, WARNING, "IFRAME_TRACE: reflow done, iframe=%p bw=%p status=%d",
-	      (void *)htmlc->iframe, (void *)htmlc->bw, htmlc->base.status);
-
 	/* Layout the new box tree */
 	if (htmlc->layout != NULL) {
 		layout_document(htmlc, htmlc->base.available_width,
 				htmlc->base.available_height);
 	}
 
-	/* Create browser_windows for any new iframes found during
-	 * box tree rebuild. Only process iframes that don't already
-	 * have a browser_window (box->iframe == NULL). Uses standalone
-	 * heap bw's that don't depend on bw->iframes array. */
-	if (htmlc->bw != NULL && htmlc->iframe != NULL) {
-		struct content_html_iframe *cur;
-		{
-			int count = 0;
-			struct content_html_iframe *tmp;
-			for (tmp = htmlc->iframe; tmp != NULL; tmp = tmp->next) count++;
-			NSLOG(jserrors, WARNING, "IFRAME_TRACE: %d iframe descriptors, bw=%p",
-			      count, (void *)htmlc->bw);
-		}
-		for (cur = htmlc->iframe; cur != NULL; cur = cur->next) {
-			if (cur->box != NULL &&
-					cur->box->iframe == NULL &&
-					cur->url != NULL) {
-				struct browser_window *ibw = NULL;
-				browser_window_create_iframe_dynamic(
-					htmlc->bw, cur->url,
-					cur->box->node, &ibw);
-				if (ibw != NULL) {
-					NSLOG(jserrors, WARNING, "IFRAME_TRACE: created standalone bw=%p for node=%p url=%s",
-					      (void *)ibw, (void *)cur->box->node, nsurl_access(cur->url));
-					/* Store bw on DOM node for
-					 * contentDocument Path 2 */
-					dom_string *ukey;
-					dom_exception exc;
-					exc = dom_string_create(
-						(const uint8_t *)
-						"__ns_iframe_bw",
-						14, &ukey);
-					if (exc == DOM_NO_ERR) {
-						void *prev = NULL;
-						dom_node_set_user_data(
-							cur->box->node,
-							ukey, ibw,
-							NULL, &prev);
-						dom_string_unref(ukey);
-					}
-				}
-			}
-		}
-	}
+	/* Dynamic iframe loading deferred — cannot distinguish new iframes
+	 * from existing ones after reflow (all boxes are new, all have
+	 * box->iframe == NULL). Creating standalone bw's for ALL iframes
+	 * after every reflow causes duplicate processing and slow perf.
+	 * Needs DOM node user data tracking to identify which iframes
+	 * already have browser_windows. */
 
 	/* Trigger redraw via CONTENT_MSG_REFORMAT */
 	{
@@ -2149,6 +2103,25 @@ struct content_html_iframe *html_get_iframe(hlcache_handle *h)
 	assert(c != NULL);
 
 	return c->iframe;
+}
+
+/* exported function documented in html/html.h */
+void html_fire_iframe_onload(hlcache_handle *parent_content,
+		dom_node *iframe_node)
+{
+	html_content *htmlc;
+
+	if (parent_content == NULL || iframe_node == NULL)
+		return;
+	if (content_get_type(parent_content) != CONTENT_HTML)
+		return;
+
+	htmlc = (html_content *)hlcache_handle_get_content(parent_content);
+	if (htmlc == NULL || htmlc->jsthread == NULL)
+		return;
+
+	js_fire_event(htmlc->jsthread, "load",
+		      htmlc->document, iframe_node);
 }
 
 /**

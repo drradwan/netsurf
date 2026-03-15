@@ -969,22 +969,12 @@ browser_window_content_done(struct browser_window *bw)
 				     browser_window_refresh, bw);
 	}
 
-	NSLOG(jserrors, WARNING, "IFRAME_TRACE: content_done bw=%p iframe_node=%p type=%d",
-	      (void *)bw, (void *)bw->iframe_node, bw->browser_window_type);
-
 	/* Fire load event on iframe element for dynamic iframes */
 	if (bw->iframe_node != NULL &&
 			bw->parent != NULL &&
-			bw->parent->current_content != NULL &&
-			content_get_type(bw->parent->current_content)
-				== CONTENT_HTML) {
-		html_content *phtmlc = (html_content *)
-			hlcache_handle_get_content(
-				bw->parent->current_content);
-		if (phtmlc != NULL && phtmlc->jsthread != NULL) {
-			js_fire_event(phtmlc->jsthread, "load",
-				phtmlc->document, bw->iframe_node);
-		}
+			bw->parent->current_content != NULL) {
+		html_fire_iframe_onload(bw->parent->current_content,
+				bw->iframe_node);
 	}
 
 	return NSERROR_OK;

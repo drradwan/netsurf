@@ -1027,7 +1027,6 @@ box_iframe(dom_node *n,
 	   struct box *box,
 	   bool *convert_children)
 {
-	NSLOG(jserrors, WARNING, "IFRAME_TRACE: box_iframe called for node=%p", (void *)n);
 	nsurl *url;
 	dom_string *s;
 	dom_exception err;
@@ -1084,9 +1083,6 @@ box_iframe(dom_node *n,
 	/* Add this iframe to the linked list of iframes */
 	iframe->next = content->iframe;
 	content->iframe = iframe;
-
-	NSLOG(jserrors, WARNING, "IFRAME_TRACE: descriptor created url=%s box=%p",
-	      nsurl_access(url), (void *)box);
 
 	/* fill in specified values */
 	err = dom_element_get_attribute(n, corestring_dom_name, &s);
