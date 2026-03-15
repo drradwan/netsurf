@@ -966,6 +966,21 @@ browser_window_content_done(struct browser_window *bw)
 				     browser_window_refresh, bw);
 	}
 
+	/* Fire load event on iframe element for dynamic iframes */
+	if (bw->iframe_node != NULL &&
+			bw->parent != NULL &&
+			bw->parent->current_content != NULL &&
+			content_get_type(bw->parent->current_content)
+				== CONTENT_HTML) {
+		html_content *phtmlc = (html_content *)
+			hlcache_handle_get_content(
+				bw->parent->current_content);
+		if (phtmlc != NULL && phtmlc->jsthread != NULL) {
+			js_fire_event(phtmlc->jsthread, "load",
+				phtmlc->document, bw->iframe_node);
+		}
+	}
+
 	return NSERROR_OK;
 }
 

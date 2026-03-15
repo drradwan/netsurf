@@ -37,6 +37,17 @@ struct content_html_frames;
 nserror browser_window_create_iframes(struct browser_window *bw);
 
 /**
+ * Create a standalone browser_window for a dynamically-inserted iframe.
+ * The bw is heap-allocated and NOT stored in parent->iframes.
+ * Caller must store the returned bw somewhere for cleanup.
+ */
+nserror browser_window_create_iframe_dynamic(
+		struct browser_window *parent,
+		struct nsurl *url,
+		struct dom_node *iframe_node,
+		struct browser_window **out_bw);
+
+/**
  * Recalculate iframe positions following a resize.
  *
  * \param bw The browser window to reposition iframes for

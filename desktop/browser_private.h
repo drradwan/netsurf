@@ -238,8 +238,11 @@ struct browser_window {
 	bool border;
 	colour border_colour;
 
-	/** iframe parent box */
+	/** iframe parent box (NULL for dynamic iframes) */
 	struct box *box;
+
+	/** DOM node for dynamically-created iframes (NULL for static) */
+	struct dom_node *iframe_node;
 
 	/** [cols * rows] children */
 	struct browser_window *children;

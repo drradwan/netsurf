@@ -184,7 +184,49 @@ void browser_window_handle_scrollbars(struct browser_window *bw)
 /* exported function documented in desktop/frames.h */
 nserror browser_window_invalidate_iframe(struct browser_window *bw)
 {
+	if (bw->box == NULL || bw->parent == NULL)
+		return NSERROR_OK;
 	html_redraw_a_box(bw->parent->current_content, bw->box);
+	return NSERROR_OK;
+}
+
+
+/* exported function documented in desktop/frames.h */
+nserror browser_window_create_iframe_dynamic(
+		struct browser_window *parent,
+		struct nsurl *url,
+		struct dom_node *iframe_node,
+		struct browser_window **out_bw)
+{
+	struct browser_window *iframe_bw;
+	nserror ret;
+
+	if (out_bw) *out_bw = NULL;
+
+	iframe_bw = calloc(1, sizeof(struct browser_window));
+	if (iframe_bw == NULL)
+		return NSERROR_NOMEM;
+
+	browser_window_initialise_common(BW_CREATE_NONE, iframe_bw, NULL);
+	iframe_bw->browser_window_type = BROWSER_WINDOW_IFRAME;
+	iframe_bw->parent = parent;
+	iframe_bw->box = NULL;
+	iframe_bw->iframe_node = iframe_node;
+	iframe_bw->scale = parent->scale;
+
+	browser_window_set_dimensions(iframe_bw, 0, 0);
+
+	ret = browser_window_navigate(iframe_bw, url,
+			hlcache_handle_get_url(parent->current_content),
+			BW_NAVIGATE_UNVERIFIABLE,
+			NULL, NULL, parent->current_content);
+
+	if (ret != NSERROR_OK) {
+		free(iframe_bw);
+		return ret;
+	}
+
+	if (out_bw) *out_bw = iframe_bw;
 	return NSERROR_OK;
 }
 
